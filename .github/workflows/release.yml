@@ -1,0 +1,84 @@
+name: Build signed APK
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Signing secrets missing. Run the 'Generate signing keystore' workflow once and add KEYSTORE_BASE64 and KEYSTORE_PASSWORD as repo secrets (see SETUP.md)."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          if [ -z "$GOOGLE_WEB_CLIENT_ID" ]; then
+            echo "::warning::Repo variable GOOGLE_WEB_CLIENT_ID is not set; the app will build but sign-in won't work until it is (see SETUP.md step 6)."
+          fi
+          ./gradlew --no-daemon assembleRelease testReleaseUnitTest
+
+      - name: Print signing certificate (SHA-1 for Google Cloud)
+        id: cert
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs "$APK" | tee certs.txt
+          SHA1=$(grep -m1 'SHA-1 digest' certs.txt | awk '{print $NF}' | sed 's/../&:/g; s/:$//' | tr a-f A-F)
+          echo "SHA-1: $SHA1"
+          echo "sha1=$SHA1" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA1: ${{ steps.cert.outputs.sha1 }}
+          BRANCH: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          VERSION="0.1.${{ github.run_number }}"
+          TAG="v$VERSION"
+          cp app/build/outputs/apk/release/app-release.apk "drive-folder-sync-$VERSION.apk"
+          PRERELEASE=""
+          if [ "$BRANCH" != "$DEFAULT_BRANCH" ]; then PRERELEASE="--prerelease"; fi
+          gh release create "$TAG" "drive-folder-sync-$VERSION.apk" \
+            --target "$GITHUB_SHA" \
+            --title "$VERSION ($BRANCH)" \
+            --notes "Built from \`$BRANCH\` @ ${GITHUB_SHA:0:7}. Signing SHA-1: \`$SHA1\`" \
+            $PRERELEASE
+          {
+            echo "### Drive Folder Sync $VERSION"
+            echo ""
+            echo "- Branch: \`$BRANCH\`"
+            echo "- Signing SHA-1: \`$SHA1\`"
+            echo "- Download: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          } >> "$GITHUB_STEP_SUMMARY"
