@@ -11,9 +11,9 @@ CI builds the APK, and the app updates itself from GitHub Releases. Read `README
 - **Never verified on a device:** the v0.1.9 UI redesign (glass, animations, tabs), sync history,
   notifications, exclude rules, and the self-update flow. Verify with the unit and screenshot tests below,
   and keep changes conservative.
-- Google OAuth app is in **Testing** mode: Drive access expires every 7 days, and the app shows a
-  "Drive sync is paused" notification. Publishing (SETUP.md step 9) needs GitHub Pages turned on for `/docs`.
-  The owner hasn't done that yet; Google kept the Publish button disabled until home page and privacy links exist.
+- Google OAuth app is **In production** (published, unverified) since 2026-10-23. Home page and privacy
+  policy are served from `docs/` via GitHub Pages (`https://hystericmoon.github.io/drive-folder-sync/`) and are
+  linked on the consent screen, so keep those URLs working. Users see Google's "unverified app" warning once at sign-in.
 
 ## Workflow rules
 
