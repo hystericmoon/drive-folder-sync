@@ -14,7 +14,7 @@ import io.github.hystericmoon.drivesync.Notifier
 import io.github.hystericmoon.drivesync.data.SyncLogEntry
 import io.github.hystericmoon.drivesync.data.FolderPair
 import io.github.hystericmoon.drivesync.drive.DriveClient
-import kotlinx.coroutines.flow.Flow
+import io.github.hystericmoon.drivesync.sync.SyncProgress
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -44,7 +44,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val webClientConfigured = app.auth.isConfigured
     val pairs: StateFlow<List<FolderPair>> =
         app.db.pairs().observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val progress: StateFlow<Map<Long, String>> = app.engine.progress
+    val progress: StateFlow<Map<Long, SyncProgress>> = app.engine.progress
+    val settings: AppSettings = app.settings
+    val allHistory: StateFlow<List<SyncLogEntry>> =
+        app.db.log().observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun syncAll() = pairs.value.forEach { app.scheduler.syncNow(it.id) }
 
     private val _auth = MutableStateFlow(AuthState(email = app.auth.accountEmail))
     val auth: StateFlow<AuthState> = _auth.asStateFlow()
@@ -60,8 +65,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _update = MutableStateFlow(UpdateUi(app.updater.autoUpdate, app.updater.currentVersion))
     val update: StateFlow<UpdateUi> = _update.asStateFlow()
-
-    fun history(pairId: Long): Flow<List<SyncLogEntry>> = app.db.log().observe(pairId)
 
     fun setAutoUpdate(enabled: Boolean) {
         app.updater.autoUpdate = enabled

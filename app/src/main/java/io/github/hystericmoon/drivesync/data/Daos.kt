@@ -42,8 +42,8 @@ interface BaselineDao {
 
 @Dao
 interface SyncLogDao {
-    @Query("SELECT * FROM sync_log WHERE pairId = :pairId ORDER BY id DESC LIMIT :limit")
-    fun observe(pairId: Long, limit: Int = KEEP): Flow<List<SyncLogEntry>>
+    @Query("SELECT * FROM sync_log ORDER BY id DESC LIMIT :limit")
+    fun observeAll(limit: Int = KEEP): Flow<List<SyncLogEntry>>
 
     @Insert
     suspend fun insert(entry: SyncLogEntry)

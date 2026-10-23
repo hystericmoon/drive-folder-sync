@@ -7,6 +7,7 @@ import io.github.hystericmoon.drivesync.auth.GoogleAuth
 import io.github.hystericmoon.drivesync.data.AppDatabase
 import io.github.hystericmoon.drivesync.sync.SyncEngine
 import io.github.hystericmoon.drivesync.sync.SyncScheduler
+import io.github.hystericmoon.drivesync.ui.AppSettings
 import io.github.hystericmoon.drivesync.update.Updater
 
 class DriveSyncApp : Application() {
@@ -15,6 +16,7 @@ class DriveSyncApp : Application() {
     lateinit var engine: SyncEngine private set
     lateinit var scheduler: SyncScheduler private set
     lateinit var updater: Updater private set
+    lateinit var settings: AppSettings private set
 
     /** True while any activity is started; lets background code decide between a dialog and a notification. */
     @Volatile var inForeground = false
@@ -27,6 +29,7 @@ class DriveSyncApp : Application() {
         engine = SyncEngine(this, db, auth)
         scheduler = SyncScheduler(this)
         updater = Updater(this)
+        settings = AppSettings(this)
         Notifier.createChannels(this)
         scheduler.scheduleUpdateChecks(updater.autoUpdate)
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {

@@ -1,3 +1,5 @@
 <resources>
-    <style name="Theme.DriveSync" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.DriveSync" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F5F6FB</item>
+    </style>
 </resources>

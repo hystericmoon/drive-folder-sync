@@ -3,6 +3,17 @@
 A personal Android app that two-way syncs phone folders with Google Drive folders.
 It's built with Kotlin and Jetpack Compose. **Setup: see [SETUP.md](SETUP.md)** (doable entirely from a phone).
 
+## Screens
+
+| Folders | History | Settings |
+|---|---|---|
+| ![Folders, light](app/screenshots/1-folders-light.png) | ![History, light](app/screenshots/2-history-light.png) | ![Settings, light](app/screenshots/3-settings-light.png) |
+| ![Folders, dark](app/screenshots/1-folders-dark.png) | ![History, dark](app/screenshots/2-history-dark.png) | ![Settings, dark](app/screenshots/3-settings-dark.png) |
+
+Material 3 with a "liquid glass" layer: translucent frosted cards over a slowly drifting colour field, and a floating glass navigation bar whose selection slides on a spring. While a pair syncs, its orb spins, data dots stream both ways and a progress bar fills. Light, dark or system theme, plus optional wallpaper colours, are set in **Settings**. All motion stops when Android's *Remove animations* is on.
+
+Regenerate the screenshots with `./gradlew testDebugUnitTest -Pscreenshots` (Robolectric + Roborazzi, no device needed).
+
 ## How it syncs
 
 Each *pair* links one phone folder (picked with the Storage Access Framework) to one Drive folder, subfolders included.
@@ -30,9 +41,9 @@ Every run does a three-way compare of **phone ↔ baseline ↔ Drive**. The base
 
 ### Also
 
-- **History:** each pair keeps a log of uploads, downloads, conflicts, trashed files and errors. Open it with **History** on the pair card, or by tapping a conflict notification.
+- **History:** each pair keeps a log of uploads, downloads, conflicts, trashed files and errors. Open it from the **History** tab, the **History** button on a pair, or a conflict notification.
 - **Notifications:** you're notified when a conflict copy is created, and when syncing pauses because Google access expired.
-- **Exclude rules:** gitignore-style patterns per pair (**⋮ → Exclude files…**), such as `*.tmp`, `node_modules/` or `Photos/raw`. Excluded paths are ignored on both sides and never deleted.
+- **Exclude rules:** gitignore-style patterns per pair (**Settings → Folder pairs → Exclude files**), such as `*.tmp`, `node_modules/` or `Photos/raw`. Excluded paths are ignored on both sides and never deleted.
 - **Auto-update:** the app checks GitHub Releases twice a day and installs newer builds signed with the same key.
 
 ### Drive side
@@ -55,6 +66,8 @@ Drive is ID/parent based, so the engine rebuilds paths from the parent chain (`R
 | `sync/ExcludeRules.kt` | Per-pair ignore patterns (unit-tested) |
 | `update/` | Self-update from GitHub Releases, with a signature check |
 | `Notifier.kt` | Conflict, sign-in, update and progress notifications |
+| `ui/glass/` | Theme, glass surfaces, ambient background, floating nav bar |
+| `ui/` | Folders / History / Settings screens, sync animation (`SyncFlow.kt`) |
 | `docs/` | GitHub Pages home page + privacy policy for the OAuth consent screen |
 | `.github/workflows/release.yml` | Signed APK → GitHub Release on every push; prints signing SHA-1 |
 | `.github/workflows/keystore.yml` | One-time signing key generator |

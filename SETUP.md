@@ -101,7 +101,7 @@ Google only lets you publish once the Branding page has a home page and privacy 
 
 ## 10. Updates
 
-The app checks this repo's **Releases** twice a day on Wi-Fi and installs newer builds from `main`. Pre-releases from other branches are ignored. You can also tap **⋮ → Check for updates**, or untick **Auto-update** in the same menu.
+The app checks this repo's **Releases** twice a day on Wi-Fi and installs newer builds from `main`. Pre-releases from other branches are ignored. You can also tap **Settings → Check for updates**, or turn off **Auto-update** there.
 
 - The first time, Android asks you to allow *Drive Folder Sync* to install apps. Allow it.
 - The first self-update shows Android's install prompt. After that, Android 12+ usually installs updates silently. When it can't, you get an "Update ready" notification.

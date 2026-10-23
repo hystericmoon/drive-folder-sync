@@ -29,6 +29,11 @@ import java.time.format.DateTimeFormatter
 
 class SyncAbortedException(message: String) : IOException(message)
 
+/** Live status of a running sync. [total] is 0 while scanning (indeterminate). */
+data class SyncProgress(val text: String, val done: Int = 0, val total: Int = 0) {
+    val fraction: Float get() = if (total > 0) done.toFloat() / total else 0f
+}
+
 private data class Snapshot(val tree: RemoteTree, val token: String, val fullScan: Boolean)
 
 class SyncEngine(
@@ -39,15 +44,15 @@ class SyncEngine(
     /** One sync at a time across all pairs, whether started by the periodic job or "Sync now". */
     private val mutex = Mutex()
 
-    private val _progress = MutableStateFlow<Map<Long, String>>(emptyMap())
-    /** pairId → human-readable status while a sync is running. */
-    val progress: StateFlow<Map<Long, String>> = _progress
+    private val _progress = MutableStateFlow<Map<Long, SyncProgress>>(emptyMap())
+    /** pairId → status while a sync is running. */
+    val progress: StateFlow<Map<Long, SyncProgress>> = _progress
 
     fun driveClient() = DriveClient(token = { auth.accessToken() }, invalidateToken = { auth.invalidate(it) })
 
     suspend fun sync(pairId: Long) = mutex.withLock {
         val pair = db.pairs().get(pairId) ?: return@withLock
-        setProgress(pairId, "Starting…")
+        setProgress(pairId, SyncProgress("Starting…"))
         try {
             withContext(Dispatchers.IO) { Run(pair).execute() }
         } catch (e: CancellationException) {
@@ -68,8 +73,8 @@ class SyncEngine(
         }
     }
 
-    private fun setProgress(pairId: Long, text: String?) = _progress.update {
-        if (text == null) it - pairId else it + (pairId to text)
+    private fun setProgress(pairId: Long, p: SyncProgress?) = _progress.update {
+        if (p == null) it - pairId else it + (pairId to p)
     }
 
     /** State for one sync of one pair. */
@@ -135,7 +140,7 @@ class SyncEngine(
             )
 
             actions.forEachIndexed { i, action ->
-                progress("${verb(action)} ${action.path} (${i + 1}/${actions.size})")
+                setProgress(pair.id, SyncProgress("${verb(action)} ${action.path.substringAfterLast('/')}", i, actions.size))
                 try {
                     perform(action)
                 } catch (e: CancellationException) {
@@ -440,7 +445,7 @@ class SyncEngine(
             }
         }
 
-        private fun progress(text: String) = setProgress(pair.id, text)
+        private fun progress(text: String) = setProgress(pair.id, SyncProgress(text))
 
         private fun summary(): String = buildList {
             if (uploaded > 0) add("↑$uploaded")

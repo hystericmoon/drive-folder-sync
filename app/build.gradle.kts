@@ -51,6 +51,17 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all {
+                // Screenshot tests only run when asked: ./gradlew testDebugUnitTest -Pscreenshots
+                it.systemProperty("screenshots", project.hasProperty("screenshots").toString())
+                it.systemProperty("roborazzi.test.record", "true")
+            }
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -93,4 +104,10 @@ dependencies {
     implementation(libs.okhttp)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

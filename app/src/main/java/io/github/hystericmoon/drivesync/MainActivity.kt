@@ -2,15 +2,22 @@ package io.github.hystericmoon.drivesync
 
 import android.Manifest
 import android.content.Intent
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.hystericmoon.drivesync.ui.AppScreen
-import io.github.hystericmoon.drivesync.ui.DriveSyncTheme
+import io.github.hystericmoon.drivesync.ui.ThemeMode
+import io.github.hystericmoon.drivesync.ui.glass.DriveSyncTheme
 
 class MainActivity : ComponentActivity() {
     /** Set when opened from a conflict notification: show that pair's history. */
@@ -18,15 +25,28 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         if (Build.VERSION.SDK_INT >= 33) {
             // For conflict / sign-in / update notifications and the "Syncing…" notice.
             registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
                 .launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         handle(intent)
+        val settings = (application as DriveSyncApp).settings
         setContent {
-            DriveSyncTheme {
+            val mode by settings.themeMode.collectAsStateWithLifecycle()
+            val dynamic by settings.dynamicColor.collectAsStateWithLifecycle()
+            val dark = when (mode) {
+                ThemeMode.System -> isSystemInDarkTheme()
+                ThemeMode.Light -> false
+                ThemeMode.Dark -> true
+            }
+            // Transparent system bars whose icons follow the app's theme, not just the system's.
+            DisposableEffect(dark) {
+                val style = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark }
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+                onDispose {}
+            }
+            DriveSyncTheme(dark = dark, dynamicColor = dynamic) {
                 AppScreen(historyRequest = historyRequest.value, onHistoryShown = { historyRequest.value = null })
             }
         }

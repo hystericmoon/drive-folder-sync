@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -25,7 +28,8 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -44,6 +48,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.hystericmoon.drivesync.drive.DriveClient
+import io.github.hystericmoon.drivesync.ui.glass.AmbientBackground
+import io.github.hystericmoon.drivesync.ui.glass.GlassShape
+import io.github.hystericmoon.drivesync.ui.glass.glass
+import androidx.compose.ui.graphics.Color
 import io.github.hystericmoon.drivesync.drive.DriveFile
 import kotlinx.coroutines.launch
 
@@ -74,10 +82,15 @@ fun DriveFolderPicker(
             .onFailure { error = it.message ?: "Couldn't load folders" }
     }
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) { AmbientBackground {
         Scaffold(
+            containerColor = Color.Transparent,
             topBar = {
                 TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                     title = {
                         Column {
                             Text(current.name)
@@ -100,9 +113,9 @@ fun DriveFolderPicker(
                 )
             },
             bottomBar = {
-                Surface(tonalElevation = 3.dp) {
+                Box(Modifier.navigationBarsPadding().padding(12.dp).glass(GlassShape, strong = true)) {
                     Row(
-                        Modifier.fillMaxWidth().padding(16.dp),
+                        Modifier.fillMaxWidth().padding(12.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                     ) {
                         TextButton(onClick = onDismiss) { Text("Cancel") }
@@ -123,12 +136,17 @@ fun DriveFolderPicker(
                         Modifier.padding(16.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    else -> LazyColumn {
+                    else -> LazyColumn(
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         items(list, key = { it.id }) { f ->
                             ListItem(
                                 headlineContent = { Text(f.name) },
                                 leadingContent = { Icon(Icons.Outlined.Folder, contentDescription = null) },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                                 modifier = Modifier
+                                    .glass(RoundedCornerShape(20.dp))
                                     .heightIn(min = 56.dp)
                                     .clickable { stack.add(Crumb(f.id, f.name)) },
                             )
@@ -137,7 +155,7 @@ fun DriveFolderPicker(
                 }
             }
         }
-    }
+    } }
 
     if (creating) {
         var name by remember { mutableStateOf(localName) }
