@@ -34,12 +34,24 @@ jobs:
             echo "::error::Signing secrets missing. Run the 'Generate signing keystore' workflow once and add KEYSTORE_BASE64 and KEYSTORE_PASSWORD as repo secrets (see SETUP.md)."
             exit 1
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          # Phone copy/paste often adds line breaks or spaces inside the long base64 line.
+          CLEAN=$(printf '%s' "$KEYSTORE_BASE64" | tr -d ' \t\r\n')
+          echo "KEYSTORE_BASE64: ${#CLEAN} base64 characters after removing whitespace"
+          if ! printf '%s' "$CLEAN" | base64 -d > "$RUNNER_TEMP/release.jks" 2>/dev/null; then
+            echo "::error::KEYSTORE_BASE64 isn't valid base64 (it has ${#CLEAN} characters; a key from the keystore workflow is about 4,500). It was probably cut off or mangled when copied. Paste the whole contents of KEYSTORE_BASE64.txt into the secret again."
+            exit 1
+          fi
+          PASSWORD=$(printf '%s' "$KEYSTORE_PASSWORD" | tr -d ' \t\r\n')
+          echo "::add-mask::$PASSWORD"
+          if ! keytool -list -keystore "$RUNNER_TEMP/release.jks" -storepass "$PASSWORD" -alias drivesync > /dev/null 2>&1; then
+            echo "::error::Can't open the keystore. Either KEYSTORE_BASE64 was cut off when copied (it has ${#CLEAN} characters; expect about 4,500), or KEYSTORE_PASSWORD doesn't belong to the same keystore run. Re-paste both from the same signing-secrets zip."
+            exit 1
+          fi
           echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "SIGNING_STORE_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
 
       - name: Build release APK
         env:
-          SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
           VERSION_CODE: ${{ github.run_number }}
         run: |
