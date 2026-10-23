@@ -62,13 +62,54 @@ class DriveHttpException(val code: Int, message: String) : IOException("Drive HT
 class InvalidPageTokenException : IOException("Changes token expired")
 
 /**
+ * The Drive side of the sync engine. [DriveClient] is the real implementation; the engine tests
+ * use an in-memory fake. Nothing here deletes permanently: removal is only ever [trash].
+ */
+interface DriveApi {
+    /** Null if the file doesn't exist (404). */
+    suspend fun getFile(id: String): DriveFile?
+
+    /** Direct, non-trashed children of a folder. */
+    suspend fun listChildren(folderId: String, foldersOnly: Boolean = false): List<DriveFile>
+
+    suspend fun getStartPageToken(): String
+
+    /** Every change since [startToken], plus the token to save for next time. Throws [InvalidPageTokenException]. */
+    suspend fun listChanges(startToken: String): ChangePage
+
+    suspend fun createFolder(name: String, parentId: String): DriveFile
+
+    suspend fun rename(id: String, newName: String): DriveFile
+
+    /** Moves to Drive trash (recoverable for 30 days). */
+    suspend fun trash(id: String): DriveFile
+
+    /** Downloads to [dest] and verifies the MD5 Drive reports. Returns the MD5 of the bytes written. */
+    suspend fun download(id: String, expectedMd5: String?, dest: File): String
+
+    /**
+     * Creates a new file when [existingId] is null, otherwise replaces its content.
+     * [open] must return a fresh stream positioned at byte 0 each time it is called.
+     */
+    suspend fun upload(
+        name: String,
+        parentId: String?,
+        existingId: String?,
+        mimeType: String,
+        size: Long,
+        open: () -> InputStream,
+        onProgress: (Long) -> Unit = {},
+    ): DriveFile
+}
+
+/**
  * Minimal Drive v3 REST client. Plain OkHttp keeps the APK small and gives full control over
  * resumable uploads from content:// streams.
  */
 class DriveClient(
     private val token: suspend () -> String,
     private val invalidateToken: suspend (String) -> Unit,
-) {
+) : DriveApi {
     private val http = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
@@ -77,13 +118,13 @@ class DriveClient(
 
     // ---- metadata ----
 
-    suspend fun getFile(id: String): DriveFile? = try {
+    override suspend fun getFile(id: String): DriveFile? = try {
         DriveFile.fromJson(json(get(api("files/$id").addQueryParameter("fields", DriveFile.FIELDS))))
     } catch (e: DriveHttpException) {
         if (e.code == 404) null else throw e
     }
 
-    suspend fun listChildren(folderId: String, foldersOnly: Boolean = false): List<DriveFile> {
+    override suspend fun listChildren(folderId: String, foldersOnly: Boolean): List<DriveFile> {
         val out = mutableListOf<DriveFile>()
         var pageToken: String? = null
         val q = buildString {
@@ -104,11 +145,11 @@ class DriveClient(
         return out
     }
 
-    suspend fun getStartPageToken(): String =
+    override suspend fun getStartPageToken(): String =
         json(get(api("changes/startPageToken"))).getString("startPageToken")
 
     /** Follows nextPageToken to the end; returns every change plus the token to save for next time. */
-    suspend fun listChanges(startToken: String): ChangePage {
+    override suspend fun listChanges(startToken: String): ChangePage {
         val out = mutableListOf<DriveChange>()
         var pageToken = startToken
         while (true) {
@@ -140,7 +181,7 @@ class DriveClient(
         }
     }
 
-    suspend fun createFolder(name: String, parentId: String): DriveFile {
+    override suspend fun createFolder(name: String, parentId: String): DriveFile {
         val body = JSONObject()
             .put("name", name)
             .put("mimeType", DriveFile.FOLDER_MIME)
@@ -150,10 +191,10 @@ class DriveClient(
         )
     }
 
-    suspend fun rename(id: String, newName: String): DriveFile = patch(id, JSONObject().put("name", newName))
+    override suspend fun rename(id: String, newName: String): DriveFile = patch(id, JSONObject().put("name", newName))
 
     /** Moves to Drive trash (recoverable for 30 days). This client never deletes permanently. */
-    suspend fun trash(id: String): DriveFile = patch(id, JSONObject().put("trashed", true))
+    override suspend fun trash(id: String): DriveFile = patch(id, JSONObject().put("trashed", true))
 
     private suspend fun patch(id: String, body: JSONObject): DriveFile = DriveFile.fromJson(
         json(execute { Request.Builder().url(api("files/$id").fields().build()).patch(body.toJsonBody()) }),
@@ -162,7 +203,7 @@ class DriveClient(
     // ---- content ----
 
     /** Downloads to [dest] and verifies the MD5 Drive reports. Returns the MD5 of the bytes written. */
-    suspend fun download(id: String, expectedMd5: String?, dest: File): String = withContext(Dispatchers.IO) {
+    override suspend fun download(id: String, expectedMd5: String?, dest: File): String = withContext(Dispatchers.IO) {
         val url = api("files/$id").addQueryParameter("alt", "media").build()
         execute { Request.Builder().url(url).get() }.use { resp ->
             val digest = MessageDigest.getInstance("MD5")
@@ -182,14 +223,14 @@ class DriveClient(
      * [open] must return a fresh stream positioned at byte 0 each time it is called (used to resume).
      * Verifies Drive's MD5 against the bytes actually sent.
      */
-    suspend fun upload(
+    override suspend fun upload(
         name: String,
         parentId: String?,
         existingId: String?,
         mimeType: String,
         size: Long,
         open: () -> InputStream,
-        onProgress: (Long) -> Unit = {},
+        onProgress: (Long) -> Unit,
     ): DriveFile = withContext(Dispatchers.IO) {
         val session = startUploadSession(name, parentId, existingId, mimeType, size)
         val digest = MessageDigest.getInstance("MD5")

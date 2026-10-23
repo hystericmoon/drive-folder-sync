@@ -11,6 +11,9 @@ CI builds the APK, and the app updates itself from GitHub Releases. Read `README
 - **Never verified on a device:** the v0.1.9 UI redesign (glass, animations, tabs), sync history,
   notifications, exclude rules, and the self-update flow. Verify with the unit and screenshot tests below,
   and keep changes conservative.
+- The sync engine is covered end to end by `SyncScenarioTest` (fakes in `test/…/sync/fakes/`). Any change to
+  `SyncEngine`, `Planner`, `RemoteTree`, `LocalFs` or `DriveApi` behaviour needs a scenario there. CI runs all unit
+  tests in their own step before building, and a failure blocks the release.
 - Google OAuth app is **In production** (published, unverified) since 2026-10-23. Home page and privacy
   policy are served from `docs/` via GitHub Pages (`https://hystericmoon.github.io/drive-folder-sync/`) and are
   linked on the consent screen, so keep those URLs working. Users see Google's "unverified app" warning once at sign-in.
@@ -39,6 +42,10 @@ yes | cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null
 cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 echo "sdk.dir=/root/android-sdk" > /home/user/drive-folder-sync/local.properties
 ```
+
+Robolectric downloads its Android jar at test time, which can fail behind the container proxy. If a test
+fails in `MavenArtifactFetcher`, fetch the jar it names with curl from `https://repo1.maven.org/maven2/org/robolectric/android-all-instrumented/<version>/`
+into the same path under `~/.m2/repository/`.
 
 Checks before pushing (Maven Central may return 429; retry, and use `--max-workers=2`):
 

@@ -14,6 +14,10 @@ Material 3 with a "liquid glass" layer: translucent frosted cards over a slowly 
 
 Regenerate the screenshots with `./gradlew testDebugUnitTest -Pscreenshots` (Robolectric + Roborazzi, no device needed).
 
+## Tests
+
+`./gradlew testDebugUnitTest` runs the planner, exclude-rule and conflict-name unit tests plus `SyncScenarioTest`: 35 end-to-end scenarios that drive the real `SyncEngine` and Room (in memory, under Robolectric) against fake phone and Drive sides, several sync runs each, checking both sides and the baseline. CI runs them before every build, and a failing test stops the release, so the app never auto-updates to it.
+
 ## How it syncs
 
 Each *pair* links one phone folder (picked with the Storage Access Framework) to one Drive folder, subfolders included.
@@ -37,6 +41,7 @@ Every run does a three-way compare of **phone ↔ baseline ↔ Drive**. The base
 - **The first sync of a pair only merges.** Nothing is deleted on either side until one sync has finished with no errors.
 - **Mass-delete guard.** If either side suddenly looks empty but the pair had at least 5 synced files, the sync stops and makes no changes.
 - **Edits beat deletes.**
+- **A download that fails halfway** (phone storage full, say) is retried next run. The half-written file is never mistaken for a phone edit.
 - **Unsyncable items are skipped, not deleted.** This covers Google Docs/Sheets/Slides (no binary content), duplicate names in one Drive folder, and names that differ only by case.
 
 ### Also
@@ -59,8 +64,8 @@ Drive is ID/parent based, so the engine rebuilds paths from the parent chain (`R
 | `sync/Planner.kt` | Pure three-way decision table (unit-tested) |
 | `sync/SyncEngine.kt` | Builds snapshots, runs the plan, updates the baseline per file |
 | `sync/RemoteTree.kt` | Drive id/parent → path resolution, duplicate handling |
-| `drive/DriveClient.kt` | Drive v3 REST over OkHttp: changes, listing, resumable upload |
-| `local/LocalFs.kt` | SAF access via `DocumentsContract` |
+| `drive/DriveClient.kt` | `DriveApi` interface + Drive v3 REST over OkHttp: changes, listing, resumable upload |
+| `local/LocalFs.kt` | `LocalFs` interface + `SafLocalFs` (SAF access via `DocumentsContract`) |
 | `auth/GoogleAuth.kt` | Credential Manager sign-in + `AuthorizationClient` (`drive` scope) |
 | `sync/SyncWorker.kt`, `SyncScheduler.kt` | WorkManager jobs |
 | `sync/ExcludeRules.kt` | Per-pair ignore patterns (unit-tested) |
@@ -69,11 +74,15 @@ Drive is ID/parent based, so the engine rebuilds paths from the parent chain (`R
 | `ui/glass/` | Theme, glass surfaces, ambient background, floating nav bar |
 | `ui/` | Folders / History / Settings screens, sync animation (`SyncFlow.kt`) |
 | `docs/` | GitHub Pages home page + privacy policy for the OAuth consent screen |
-| `.github/workflows/release.yml` | Signed APK → GitHub Release on every push; prints signing SHA-1 |
+| `test/…/sync/SyncScenarioTest.kt` | End-to-end sync runs against in-memory phone and Drive fakes (`sync/fakes/`) |
+| `.github/workflows/release.yml` | Tests, then signed APK → GitHub Release on every push; prints signing SHA-1 |
 | `.github/workflows/keystore.yml` | One-time signing key generator |
 
 ## Known limits
 
 - Shared drives aren't supported (My Drive only).
 - A resumable upload resumes within one sync run. If the job is killed mid-file, that file starts over next run.
+- Changing a pair's exclude rules makes its next sync a full Drive scan, so files that were excluded are found on both sides instead of uploaded twice.
+- The "N skipped" note for duplicate names in Drive shows after a full scan and clears on the next quick (Changes) run, though the duplicates are still skipped. It returns with the daily full scan.
+- When a phone file and a Drive file differ only by case (`Notes.txt` vs `notes.txt`), both stay in Drive and the phone keeps its own; the Drive one is reported as skipped.
 - Remote renames show up as delete + new. The old local copy goes to `.sync-trash`, and the file downloads under its new name.

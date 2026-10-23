@@ -14,18 +14,13 @@ import io.github.hystericmoon.drivesync.sync.LocalEntry
 import java.security.MessageDigest
 
 /**
- * Storage Access Framework view of one picked folder tree. Talks to DocumentsContract directly
- * (DocumentFile does one query per property, which is far too slow for whole-tree listings).
+ * The phone side of a pair, as the sync engine sees it. [SafLocalFs] is the real implementation;
+ * the engine tests use an in-memory fake.
  */
-class LocalFs(context: Context, val treeUri: Uri) {
-    private val resolver: ContentResolver = context.contentResolver
-    val rootDocId: String = DocumentsContract.getTreeDocumentId(treeUri)
+interface LocalFs {
+    val rootDocId: String
 
-    fun docUri(docId: String): Uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-
-    fun hasPermission(): Boolean = resolver.persistedUriPermissions.any {
-        it.uri == treeUri && it.isReadPermission && it.isWritePermission
-    }
+    fun hasPermission(): Boolean
 
     /** Throws if the tree is gone (SD card removed, folder deleted, permission revoked). */
     fun checkRootAccessible() {
@@ -48,7 +43,66 @@ class LocalFs(context: Context, val treeUri: Uri) {
         return out
     }
 
-    fun children(parentDocId: String, parentPath: String): List<LocalEntry> {
+    fun children(parentDocId: String, parentPath: String): List<LocalEntry>
+
+    /** The document's current state with [path] filled in, or null if it's gone. */
+    fun stat(docId: String, path: String): LocalEntry?
+
+    fun findChild(parentDocId: String, name: String): LocalEntry? =
+        children(parentDocId, "").firstOrNull { it.name == name }
+
+    /** Creates a folder named exactly [name] and returns its document id, or throws. */
+    fun createDir(parentDocId: String, name: String): String
+
+    /** Creates an empty file named exactly [name] and returns its document id, or throws. */
+    fun createFile(parentDocId: String, name: String): String
+
+    fun openInput(docId: String): InputStream
+
+    /** Write + truncate, so a shorter new version doesn't leave old bytes at the end. */
+    fun openOutput(docId: String): OutputStream
+
+    fun delete(docId: String)
+
+    fun move(docId: String, sourceParentDocId: String, targetParentDocId: String, name: String)
+
+    fun md5(docId: String): String {
+        val digest = MessageDigest.getInstance("MD5")
+        openInput(docId).use { input ->
+            val buf = ByteArray(256 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                digest.update(buf, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    companion object {
+        const val TRASH_DIR = ".sync-trash"
+
+        /** MediaStore's pending/trashed placeholders and our own temp files. */
+        fun isIgnoredName(name: String) =
+            name.startsWith(".pending-") || name.startsWith(".trashed-") || name.startsWith(".drivesync-tmp")
+    }
+}
+
+/**
+ * Storage Access Framework view of one picked folder tree. Talks to DocumentsContract directly
+ * (DocumentFile does one query per property, which is far too slow for whole-tree listings).
+ */
+class SafLocalFs(context: Context, val treeUri: Uri) : LocalFs {
+    private val resolver: ContentResolver = context.contentResolver
+    override val rootDocId: String = DocumentsContract.getTreeDocumentId(treeUri)
+
+    fun docUri(docId: String): Uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+
+    override fun hasPermission(): Boolean = resolver.persistedUriPermissions.any {
+        it.uri == treeUri && it.isReadPermission && it.isWritePermission
+    }
+
+    override fun children(parentDocId: String, parentPath: String): List<LocalEntry> {
         val uri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
         val list = mutableListOf<LocalEntry>()
         resolver.query(uri, COLUMNS, null, null, null)?.use { c ->
@@ -68,7 +122,7 @@ class LocalFs(context: Context, val treeUri: Uri) {
         return list
     }
 
-    fun stat(docId: String, path: String): LocalEntry? = try {
+    override fun stat(docId: String, path: String): LocalEntry? = try {
         resolver.query(docUri(docId), COLUMNS, null, null, null)?.use { c ->
             if (!c.moveToFirst()) return null
             LocalEntry(
@@ -85,12 +139,9 @@ class LocalFs(context: Context, val treeUri: Uri) {
         null
     }
 
-    fun findChild(parentDocId: String, name: String): LocalEntry? =
-        children(parentDocId, "").firstOrNull { it.name == name }
+    override fun createDir(parentDocId: String, name: String): String = create(parentDocId, Document.MIME_TYPE_DIR, name)
 
-    fun createDir(parentDocId: String, name: String): String = create(parentDocId, Document.MIME_TYPE_DIR, name)
-
-    fun createFile(parentDocId: String, name: String): String = create(parentDocId, mimeFor(name), name)
+    override fun createFile(parentDocId: String, name: String): String = create(parentDocId, mimeFor(name), name)
 
     /**
      * Providers silently rename on collision ("a (1).txt") or append extensions. Either would make
@@ -108,14 +159,13 @@ class LocalFs(context: Context, val treeUri: Uri) {
         return docId
     }
 
-    fun openInput(docId: String): InputStream =
+    override fun openInput(docId: String): InputStream =
         resolver.openInputStream(docUri(docId)) ?: throw FileNotFoundException(docId)
 
-    /** "wt" = write + truncate, so a shorter new version doesn't leave old bytes at the end. */
-    fun openOutput(docId: String): OutputStream =
+    override fun openOutput(docId: String): OutputStream =
         resolver.openOutputStream(docUri(docId), "wt") ?: throw FileNotFoundException(docId)
 
-    fun delete(docId: String) {
+    override fun delete(docId: String) {
         if (!DocumentsContract.deleteDocument(resolver, docUri(docId))) throw IOException("Delete failed")
     }
 
@@ -126,7 +176,7 @@ class LocalFs(context: Context, val treeUri: Uri) {
     }
 
     /** Moves a document; falls back to copy + delete when the provider doesn't support move. */
-    fun move(docId: String, sourceParentDocId: String, targetParentDocId: String, name: String) {
+    override fun move(docId: String, sourceParentDocId: String, targetParentDocId: String, name: String) {
         val moved = runCatching {
             DocumentsContract.moveDocument(resolver, docUri(docId), docUri(sourceParentDocId), docUri(targetParentDocId))
         }.getOrNull()
@@ -136,22 +186,7 @@ class LocalFs(context: Context, val treeUri: Uri) {
         delete(docId)
     }
 
-    fun md5(docId: String): String {
-        val digest = MessageDigest.getInstance("MD5")
-        openInput(docId).use { input ->
-            val buf = ByteArray(256 * 1024)
-            while (true) {
-                val n = input.read(buf)
-                if (n < 0) break
-                digest.update(buf, 0, n)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
-
     companion object {
-        const val TRASH_DIR = ".sync-trash"
-
         private val COLUMNS = arrayOf(
             Document.COLUMN_DOCUMENT_ID,
             Document.COLUMN_DISPLAY_NAME,
@@ -159,10 +194,6 @@ class LocalFs(context: Context, val treeUri: Uri) {
             Document.COLUMN_LAST_MODIFIED,
             Document.COLUMN_SIZE,
         )
-
-        /** MediaStore's pending/trashed placeholders and our own temp files. */
-        fun isIgnoredName(name: String) =
-            name.startsWith(".pending-") || name.startsWith(".trashed-") || name.startsWith(".drivesync-tmp")
 
         fun mimeFor(name: String): String {
             val ext = name.substringAfterLast('.', "").lowercase()

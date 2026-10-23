@@ -10,9 +10,10 @@ import io.github.hystericmoon.drivesync.data.BaselineEntry
 import io.github.hystericmoon.drivesync.data.FolderPair
 import io.github.hystericmoon.drivesync.data.LogKind
 import io.github.hystericmoon.drivesync.data.SyncLogEntry
-import io.github.hystericmoon.drivesync.drive.DriveClient
+import io.github.hystericmoon.drivesync.drive.DriveApi
 import io.github.hystericmoon.drivesync.drive.InvalidPageTokenException
 import io.github.hystericmoon.drivesync.local.LocalFs
+import io.github.hystericmoon.drivesync.local.SafLocalFs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +24,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -36,19 +38,31 @@ data class SyncProgress(val text: String, val done: Int = 0, val total: Int = 0)
 
 private data class Snapshot(val tree: RemoteTree, val token: String, val fullScan: Boolean)
 
-class SyncEngine(
+/**
+ * Syncs one pair at a time. The phone and Drive sides come in through [LocalFs] and [DriveApi],
+ * so the engine tests can run it against in-memory fakes.
+ */
+class SyncEngine internal constructor(
     private val context: Context,
     private val db: AppDatabase,
-    private val auth: GoogleAuth,
+    private val newDrive: () -> DriveApi,
+    private val openLocal: (FolderPair) -> LocalFs,
+    private val clock: Clock,
 ) {
+    constructor(context: Context, db: AppDatabase, auth: GoogleAuth) : this(
+        context,
+        db,
+        newDrive = auth::driveClient,
+        openLocal = { SafLocalFs(context, Uri.parse(it.localTreeUri)) },
+        clock = Clock.systemDefaultZone(),
+    )
+
     /** One sync at a time across all pairs, whether started by the periodic job or "Sync now". */
     private val mutex = Mutex()
 
     private val _progress = MutableStateFlow<Map<Long, SyncProgress>>(emptyMap())
     /** pairId → status while a sync is running. */
     val progress: StateFlow<Map<Long, SyncProgress>> = _progress
-
-    fun driveClient() = DriveClient(token = { auth.accessToken() }, invalidateToken = { auth.invalidate(it) })
 
     suspend fun sync(pairId: Long) = mutex.withLock {
         val pair = db.pairs().get(pairId) ?: return@withLock
@@ -60,10 +74,10 @@ class SyncEngine(
         } catch (e: Exception) {
             val message = e.message ?: e.toString()
             db.pairs().get(pairId)?.let {
-                db.pairs().update(it.copy(lastSyncAt = System.currentTimeMillis(), lastError = message))
+                db.pairs().update(it.copy(lastSyncAt = clock.millis(), lastError = message))
             }
             db.log().insertUnlessRepeat(
-                SyncLogEntry(pairId = pairId, time = System.currentTimeMillis(), kind = LogKind.ERROR, path = "", detail = message),
+                SyncLogEntry(pairId = pairId, time = clock.millis(), kind = LogKind.ERROR, path = "", detail = message),
             )
             if (e is NeedsUserConsentException) throw e
             if (e is IOException && e !is SyncAbortedException) throw e // let WorkManager retry transient failures
@@ -79,11 +93,11 @@ class SyncEngine(
 
     /** State for one sync of one pair. */
     private inner class Run(private val pair: FolderPair) {
-        private val fs = LocalFs(context, Uri.parse(pair.localTreeUri))
-        private val drive = driveClient()
+        private val fs = openLocal(pair)
+        private val drive = newDrive()
         private val baselineDao = db.baseline()
         private val rootId = pair.driveFolderId
-        private val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HHmmss"))
+        private val stamp = LocalDateTime.now(clock).format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HHmmss"))
 
         private val localDirIds = HashMap<String, String>()
         private val remoteDirIds = HashMap<String, String>()
@@ -113,7 +127,7 @@ class SyncEngine(
                 // Newly excluded paths are forgotten, never deleted.
                 !excludes.isExcluded(row.path).also { if (it) baselineDao.delete(pair.id, row.path) }
             }
-            val now = System.currentTimeMillis()
+            val now = clock.millis()
 
             progress("Checking Drive…")
             val (tree, newToken, fullScan) = remoteSnapshot(baselineRows, now)
@@ -163,9 +177,10 @@ class SyncEngine(
                 latest.copy(
                     // Keep the old cursor if anything failed, so the same changes are seen again next time.
                     changesPageToken = if (clean) newToken else latest.changesPageToken,
-                    lastFullScanAt = if (clean && fullScan) now else latest.lastFullScanAt,
+                    // A scan done with rules that changed meanwhile doesn't count (see FolderPair.withExcludePatterns).
+                    lastFullScanAt = if (clean && fullScan && latest.excludePatterns == pair.excludePatterns) now else latest.lastFullScanAt,
                     initialSyncDone = latest.initialSyncDone || clean,
-                    lastSyncAt = System.currentTimeMillis(),
+                    lastSyncAt = clock.millis(),
                     lastSummary = summary(),
                     lastError = (failures + warnings).takeIf { it.isNotEmpty() }?.let {
                         val head = if (failures.isEmpty()) "${it.size} skipped:" else "${failures.size} failed (will retry):"
@@ -176,7 +191,7 @@ class SyncEngine(
         }
 
         private suspend fun log(kind: LogKind, path: String, detail: String?) {
-            val entry = SyncLogEntry(pairId = pair.id, time = System.currentTimeMillis(), kind = kind, path = path, detail = detail)
+            val entry = SyncLogEntry(pairId = pair.id, time = clock.millis(), kind = kind, path = path, detail = detail)
             if (kind == LogKind.ERROR || kind == LogKind.SKIPPED) db.log().insertUnlessRepeat(entry) else db.log().insert(entry)
         }
 
@@ -324,9 +339,15 @@ class SyncEngine(
                 } else {
                     fs.createFile(ensureLocalDir(parentOf(path)), nameOf(path))
                 }
-                tmp.inputStream().use { input -> fs.openOutput(docId).use { input.copyTo(it) } }
-                val written = fs.stat(docId, path) ?: throw IOException("file vanished after writing")
-                if (written.size != tmp.length()) throw IOException("short write (${written.size}/${tmp.length()})")
+                val written = try {
+                    tmp.inputStream().use { input -> fs.openOutput(docId).use { input.copyTo(it) } }
+                    val stat = fs.stat(docId, path) ?: throw IOException("file vanished after writing")
+                    if (stat.size != tmp.length()) throw IOException("short write (${stat.size}/${tmp.length()})")
+                    stat
+                } catch (e: IOException) {
+                    rememberPartialDownload(path, docId, r)
+                    throw e
+                }
                 baselineDao.upsert(
                     BaselineEntry(
                         pairId = pair.id, path = path, isDir = false,
@@ -341,6 +362,24 @@ class SyncEngine(
             } finally {
                 tmp.delete()
             }
+        }
+
+        /**
+         * A failed write (phone storage full, say) leaves part of the Drive file on the phone. Record
+         * that file as ours with no known Drive version, so the next run downloads it again instead of
+         * mistaking it for a phone edit, which would upload the broken copy and turn the real file into
+         * a conflict copy.
+         */
+        private suspend fun rememberPartialDownload(path: String, docId: String, r: RemoteEntry) {
+            val partial = fs.stat(docId, path) ?: return
+            baselineDao.upsert(
+                BaselineEntry(
+                    pairId = pair.id, path = path, isDir = false,
+                    localDocId = docId, localSize = partial.size, localLastModified = partial.lastModified,
+                    driveFileId = r.id, driveParentId = r.parentId,
+                    driveMd5 = null, driveModifiedTime = null,
+                ),
+            )
         }
 
         private suspend fun trashLocal(path: String, l: LocalEntry) {
@@ -368,7 +407,7 @@ class SyncEngine(
                 return
             }
             val parent = parentOf(path)
-            val conflictName = ConflictNames.conflictName(nameOf(path), LocalDate.now()) { candidate ->
+            val conflictName = ConflictNames.conflictName(nameOf(path), LocalDate.now(clock)) { candidate ->
                 join(parent, candidate).lowercase() in takenPaths
             }
             val conflictPath = join(parent, conflictName)
@@ -437,7 +476,7 @@ class SyncEngine(
         /** Deletes .sync-trash/<date>_<time> folders older than [TRASH_RETENTION_DAYS]. */
         private fun purgeOldTrash() {
             val trash = fs.findChild(fs.rootDocId, LocalFs.TRASH_DIR)?.takeIf { it.isDir } ?: return
-            val cutoff = LocalDate.now().minusDays(TRASH_RETENTION_DAYS)
+            val cutoff = LocalDate.now(clock).minusDays(TRASH_RETENTION_DAYS)
             for (batch in fs.children(trash.docId, LocalFs.TRASH_DIR)) {
                 if (!batch.isDir) continue
                 val day = runCatching { LocalDate.parse(batch.name.take(10)) }.getOrNull() ?: continue

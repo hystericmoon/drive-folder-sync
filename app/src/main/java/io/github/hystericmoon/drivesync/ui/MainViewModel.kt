@@ -95,10 +95,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateExcludes(pair: FolderPair, patterns: String) = viewModelScope.launch {
-        app.db.pairs().get(pair.id)?.let { app.db.pairs().update(it.copy(excludePatterns = patterns)) }
+        app.db.pairs().get(pair.id)?.let { app.db.pairs().update(it.withExcludePatterns(patterns)) }
     }
 
-    fun driveClient(): DriveClient = app.engine.driveClient()
+    fun driveClient(): DriveClient = app.auth.driveClient()
 
     fun signIn(activity: Activity) = viewModelScope.launch {
         _auth.update { it.copy(busy = true, message = null) }

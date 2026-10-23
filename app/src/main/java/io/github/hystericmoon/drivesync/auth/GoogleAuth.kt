@@ -17,6 +17,7 @@ import com.google.android.gms.common.api.Scope
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import io.github.hystericmoon.drivesync.BuildConfig
+import io.github.hystericmoon.drivesync.drive.DriveClient
 import kotlinx.coroutines.tasks.await
 
 /** Thrown when Drive access needs the user to approve a consent screen (not possible from a background job). */
@@ -66,6 +67,9 @@ class GoogleAuth(private val context: Context) {
         if (result.hasResolution()) throw NeedsUserConsentException()
         return result.accessToken ?: throw NeedsUserConsentException()
     }
+
+    /** Drive client that authenticates with this account. */
+    fun driveClient() = DriveClient(token = ::accessToken, invalidateToken = ::invalidate)
 
     /** Drops a token Drive rejected (401) so the next [accessToken] call fetches a fresh one. */
     suspend fun invalidate(token: String) {

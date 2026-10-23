@@ -26,7 +26,15 @@ data class FolderPair(
     /** Newline-separated ignore patterns, see [io.github.hystericmoon.drivesync.sync.ExcludeRules]. */
     @ColumnInfo(defaultValue = "")
     val excludePatterns: String = "",
-)
+) {
+    /**
+     * New exclude rules. Changed rules make the next sync list Drive in full: the Changes feed
+     * never mentions files that were excluded until now, so they'd look missing in Drive and the
+     * phone copies would be uploaded a second time.
+     */
+    fun withExcludePatterns(patterns: String): FolderPair =
+        if (patterns == excludePatterns) this else copy(excludePatterns = patterns, lastFullScanAt = 0)
+}
 
 /**
  * What both sides looked like the last time this path was known to be in sync.
