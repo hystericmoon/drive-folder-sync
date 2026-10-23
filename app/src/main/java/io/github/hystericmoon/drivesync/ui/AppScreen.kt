@@ -20,6 +20,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,6 +49,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -47,11 +60,31 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppScreen(vm: MainViewModel = viewModel()) {
+fun AppScreen(
+    historyRequest: Long? = null,
+    onHistoryShown: () -> Unit = {},
+    vm: MainViewModel = viewModel(),
+) {
     val auth by vm.auth.collectAsStateWithLifecycle()
     val pairs by vm.pairs.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
+    val update by vm.update.collectAsStateWithLifecycle()
+    val snack by vm.snackbar.collectAsStateWithLifecycle()
+    val launchIntent by vm.launch.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val snackbarHost = remember { SnackbarHostState() }
+    var historyFor by rememberSaveable { mutableStateOf<Long?>(null) }
+    var menu by remember { mutableStateOf(false) }
+
+    LaunchedEffect(historyRequest) {
+        if (historyRequest != null) { historyFor = historyRequest; onHistoryShown() }
+    }
+    LaunchedEffect(snack) {
+        snack?.let { vm.snackbar.value = null; snackbarHost.showSnackbar(it) }
+    }
+    LaunchedEffect(launchIntent) {
+        launchIntent?.let { vm.launch.value = null; runCatching { context.startActivity(it) } }
+    }
 
     val consentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
         vm.onConsentResult(it.data)
@@ -82,10 +115,40 @@ fun AppScreen(vm: MainViewModel = viewModel()) {
                     }
                 },
                 actions = {
-                    if (auth.email != null) {
-                        IconButton(onClick = { vm.signOut() }) {
-                            Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sign out")
+                    IconButton(onClick = { menu = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "Menu")
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text(if (update.checking) "Checking…" else "Check for updates") },
+                            enabled = !update.checking,
+                            leadingIcon = { Icon(Icons.Outlined.SystemUpdate, contentDescription = null) },
+                            onClick = { menu = false; vm.checkForUpdates() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Auto-update") },
+                            modifier = Modifier.semantics {
+                                role = Role.Checkbox
+                                stateDescription = if (update.autoUpdate) "On" else "Off"
+                            },
+                            leadingIcon = {
+                                Checkbox(checked = update.autoUpdate, onCheckedChange = null)
+                            },
+                            onClick = { vm.setAutoUpdate(!update.autoUpdate) },
+                        )
+                        if (auth.email != null) {
+                            DropdownMenuItem(
+                                text = { Text("Sign out") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null) },
+                                onClick = { menu = false; vm.signOut() },
+                            )
                         }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Version ${update.currentVersion}", style = MaterialTheme.typography.bodySmall) },
+                            enabled = false,
+                            onClick = {},
+                        )
                     }
                 },
             )
@@ -99,6 +162,7 @@ fun AppScreen(vm: MainViewModel = viewModel()) {
                 )
             }
         },
+        snackbarHost = { SnackbarHost(snackbarHost) },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when {
@@ -136,11 +200,22 @@ fun AppScreen(vm: MainViewModel = viewModel()) {
                             running = progress[pair.id],
                             onSyncNow = { vm.syncNow(pair) },
                             onConstraints = { wifi, charging -> vm.updateConstraints(pair, wifi, charging) },
+                            onHistory = { historyFor = pair.id },
+                            onExcludes = { vm.updateExcludes(pair, it) },
                             onRemove = { vm.removePair(pair) },
                         )
                     }
                 }
             }
+        }
+    }
+
+    historyFor?.let { id ->
+        val pair = pairs.firstOrNull { it.id == id }
+        if (pair == null) {
+            if (pairs.isNotEmpty()) historyFor = null
+        } else {
+            HistoryScreen(pair, remember(id) { vm.history(id) }, onDismiss = { historyFor = null })
         }
     }
 

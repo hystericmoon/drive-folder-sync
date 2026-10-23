@@ -39,3 +39,32 @@ interface BaselineDao {
     @Query("DELETE FROM baseline WHERE pairId = :pairId AND path = :path")
     suspend fun delete(pairId: Long, path: String)
 }
+
+@Dao
+interface SyncLogDao {
+    @Query("SELECT * FROM sync_log WHERE pairId = :pairId ORDER BY id DESC LIMIT :limit")
+    fun observe(pairId: Long, limit: Int = KEEP): Flow<List<SyncLogEntry>>
+
+    @Insert
+    suspend fun insert(entry: SyncLogEntry)
+
+    @Query("SELECT * FROM sync_log WHERE pairId = :pairId AND path = :path ORDER BY id DESC LIMIT 1")
+    suspend fun latestFor(pairId: Long, path: String): SyncLogEntry?
+
+    /** Skips and errors repeat on every run until resolved; log them only when they change. */
+    suspend fun insertUnlessRepeat(entry: SyncLogEntry) {
+        val last = latestFor(entry.pairId, entry.path)
+        if (last != null && last.kind == entry.kind && last.detail == entry.detail) return
+        insert(entry)
+    }
+
+    @Query(
+        "DELETE FROM sync_log WHERE pairId = :pairId AND id NOT IN " +
+            "(SELECT id FROM sync_log WHERE pairId = :pairId ORDER BY id DESC LIMIT :keep)",
+    )
+    suspend fun prune(pairId: Long, keep: Int = KEEP)
+
+    companion object {
+        const val KEEP = 1000
+    }
+}

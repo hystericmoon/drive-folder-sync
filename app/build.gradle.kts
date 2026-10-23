@@ -9,6 +9,7 @@ plugins {
 val signingKeystore: String? = System.getenv("SIGNING_KEYSTORE_PATH")
 val signingPassword: String? = System.getenv("SIGNING_STORE_PASSWORD")
 val webClientId: String = System.getenv("GOOGLE_WEB_CLIENT_ID") ?: ""
+val updateRepo: String = System.getenv("GITHUB_REPOSITORY") ?: "hystericmoon/drive-folder-sync"
 val ciVersionCode: Int = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
 
 android {
@@ -22,6 +23,7 @@ android {
         versionCode = ciVersionCode
         versionName = "0.1.$ciVersionCode"
         buildConfigField("String", "WEB_CLIENT_ID", "\"$webClientId\"")
+        buildConfigField("String", "UPDATE_REPO", "\"$updateRepo\"")
     }
 
     signingConfigs {
@@ -63,6 +65,7 @@ kotlin {
 
 ksp {
     arg("room.generateKotlin", "true")
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {

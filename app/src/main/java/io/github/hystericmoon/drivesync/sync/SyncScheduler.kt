@@ -11,6 +11,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import io.github.hystericmoon.drivesync.data.FolderPair
+import io.github.hystericmoon.drivesync.update.UpdateWorker
 import java.util.concurrent.TimeUnit
 
 class SyncScheduler(context: Context) {
@@ -41,6 +42,18 @@ class SyncScheduler(context: Context) {
         wm.enqueueUniqueWork(nowName(pairId), ExistingWorkPolicy.KEEP, request)
     }
 
+    /** Twice a day, on unmetered networks, check GitHub Releases for a newer APK. */
+    fun scheduleUpdateChecks(enabled: Boolean) {
+        if (!enabled) {
+            wm.cancelUniqueWork(UPDATE_WORK)
+            return
+        }
+        val request = PeriodicWorkRequestBuilder<UpdateWorker>(12, TimeUnit.HOURS)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).build())
+            .build()
+        wm.enqueueUniquePeriodicWork(UPDATE_WORK, ExistingPeriodicWorkPolicy.KEEP, request)
+    }
+
     fun cancel(pairId: Long) {
         wm.cancelUniqueWork(periodicName(pairId))
         wm.cancelUniqueWork(nowName(pairId))
@@ -51,5 +64,6 @@ class SyncScheduler(context: Context) {
 
     companion object {
         const val TAG = "sync"
+        private const val UPDATE_WORK = "app-update"
     }
 }

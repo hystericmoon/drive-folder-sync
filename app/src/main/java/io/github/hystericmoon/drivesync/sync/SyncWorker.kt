@@ -8,6 +8,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import io.github.hystericmoon.drivesync.DriveSyncApp
+import io.github.hystericmoon.drivesync.Notifier
 import io.github.hystericmoon.drivesync.R
 import io.github.hystericmoon.drivesync.auth.NeedsUserConsentException
 import java.io.IOException
@@ -25,6 +26,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             app.engine.sync(pairId)
             Result.success()
         } catch (_: NeedsUserConsentException) {
+            Notifier.needsSignIn(applicationContext)
             Result.failure()
         } catch (_: IOException) {
             if (runAttemptCount < 5) Result.retry() else Result.failure()
@@ -32,7 +34,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
-        val notification: Notification = NotificationCompat.Builder(applicationContext, DriveSyncApp.CHANNEL_SYNC)
+        val notification: Notification = NotificationCompat.Builder(applicationContext, Notifier.CHANNEL_SYNC)
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle("Syncing with Google Drive")
             .setOngoing(true)

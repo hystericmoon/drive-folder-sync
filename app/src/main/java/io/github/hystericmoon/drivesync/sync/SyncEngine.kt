@@ -2,11 +2,14 @@ package io.github.hystericmoon.drivesync.sync
 
 import android.content.Context
 import android.net.Uri
+import io.github.hystericmoon.drivesync.Notifier
 import io.github.hystericmoon.drivesync.auth.GoogleAuth
 import io.github.hystericmoon.drivesync.auth.NeedsUserConsentException
 import io.github.hystericmoon.drivesync.data.AppDatabase
 import io.github.hystericmoon.drivesync.data.BaselineEntry
 import io.github.hystericmoon.drivesync.data.FolderPair
+import io.github.hystericmoon.drivesync.data.LogKind
+import io.github.hystericmoon.drivesync.data.SyncLogEntry
 import io.github.hystericmoon.drivesync.drive.DriveClient
 import io.github.hystericmoon.drivesync.drive.InvalidPageTokenException
 import io.github.hystericmoon.drivesync.local.LocalFs
@@ -50,12 +53,17 @@ class SyncEngine(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            val message = e.message ?: e.toString()
             db.pairs().get(pairId)?.let {
-                db.pairs().update(it.copy(lastSyncAt = System.currentTimeMillis(), lastError = e.message ?: e.toString()))
+                db.pairs().update(it.copy(lastSyncAt = System.currentTimeMillis(), lastError = message))
             }
+            db.log().insertUnlessRepeat(
+                SyncLogEntry(pairId = pairId, time = System.currentTimeMillis(), kind = LogKind.ERROR, path = "", detail = message),
+            )
             if (e is NeedsUserConsentException) throw e
             if (e is IOException && e !is SyncAbortedException) throw e // let WorkManager retry transient failures
         } finally {
+            db.log().prune(pairId)
             setProgress(pairId, null)
         }
     }
@@ -81,7 +89,8 @@ class SyncEngine(
         private var downloaded = 0
         private var trashedLocal = 0
         private var trashedRemote = 0
-        private var conflicts = 0
+        private val conflictNames = mutableListOf<String>()
+        private val excludes = ExcludeRules(pair.excludePatterns)
         /** Errors: the sync is retried and the Changes cursor is not advanced. */
         private val failures = mutableListOf<String>()
         /** Permanent, by-design skips (duplicate names, type clashes): reported but don't block progress. */
@@ -95,16 +104,20 @@ class SyncEngine(
                 throw SyncAbortedException("Drive folder “${pair.driveFolderName}” is missing or in the trash.")
             }
 
-            val baselineRows = baselineDao.forPair(pair.id)
+            val baselineRows = baselineDao.forPair(pair.id).filter { row ->
+                // Newly excluded paths are forgotten, never deleted.
+                !excludes.isExcluded(row.path).also { if (it) baselineDao.delete(pair.id, row.path) }
+            }
             val now = System.currentTimeMillis()
 
             progress("Checking Drive…")
             val (tree, newToken, fullScan) = remoteSnapshot(baselineRows, now)
             val remote = tree.resolve(baselineRows.mapNotNullTo(HashSet()) { it.driveFileId })
-            tree.skipped.forEach { warnings += "$it: skipped (duplicate or invalid name in Drive)" }
+                .filterKeys { !excludes.isExcluded(it) }
+            tree.skipped.filterNot(excludes::isExcluded).forEach { warn(it, "skipped (duplicate or invalid name in Drive)") }
 
             progress("Scanning phone folder…")
-            val local = fs.listTree()
+            val local = fs.listTree().filterKeys { !excludes.isExcluded(it) }
 
             guardAgainstMassDeletion(baselineRows, local, remote)
 
@@ -130,11 +143,14 @@ class SyncEngine(
                 } catch (e: NeedsUserConsentException) {
                     throw e
                 } catch (e: Exception) {
-                    failures += "${action.path}: ${e.message ?: e.javaClass.simpleName}"
+                    val message = e.message ?: e.javaClass.simpleName
+                    failures += "${action.path}: $message"
+                    log(LogKind.ERROR, action.path, message)
                 }
             }
 
             runCatching { purgeOldTrash() }
+            Notifier.conflicts(context, pair.id, pair.localName, conflictNames)
 
             val clean = failures.isEmpty()
             val latest = db.pairs().get(pair.id) ?: return
@@ -152,6 +168,16 @@ class SyncEngine(
                     },
                 ),
             )
+        }
+
+        private suspend fun log(kind: LogKind, path: String, detail: String?) {
+            val entry = SyncLogEntry(pairId = pair.id, time = System.currentTimeMillis(), kind = kind, path = path, detail = detail)
+            if (kind == LogKind.ERROR || kind == LogKind.SKIPPED) db.log().insertUnlessRepeat(entry) else db.log().insert(entry)
+        }
+
+        private suspend fun warn(path: String, reason: String) {
+            warnings += "$path: $reason"
+            log(LogKind.SKIPPED, path, reason)
         }
 
         // ---- remote snapshot ----
@@ -227,6 +253,7 @@ class SyncEngine(
                     drive.trash(action.remote.id)
                     baselineDao.delete(pair.id, action.path)
                     trashedRemote++
+                    log(LogKind.TRASHED_REMOTE, action.path, "Deleted on phone → moved to Drive trash")
                 }
                 is Action.TrashLocal -> trashLocal(action.path, action.local)
                 is Action.Reconcile -> reconcile(action.path, action.local, action.remote)
@@ -250,7 +277,7 @@ class SyncEngine(
                         recordDir(action.path)
                     }
                 }
-                is Action.Skip -> warnings += "${action.path}: ${action.reason}"
+                is Action.Skip -> warn(action.path, action.reason)
             }
         }
 
@@ -276,6 +303,7 @@ class SyncEngine(
             )
             takenPaths += path.lowercase()
             uploaded++
+            log(LogKind.UPLOADED, path, if (replaceId == null) "New in Drive" else "Updated in Drive")
         }
 
         private suspend fun download(path: String, r: RemoteEntry, overwrite: LocalEntry?) {
@@ -304,6 +332,7 @@ class SyncEngine(
                 )
                 takenPaths += path.lowercase()
                 downloaded++
+                log(LogKind.DOWNLOADED, path, if (overwrite == null) "New on phone" else "Updated on phone")
             } finally {
                 tmp.delete()
             }
@@ -320,6 +349,7 @@ class SyncEngine(
             }
             baselineDao.delete(pair.id, path)
             trashedLocal++
+            log(LogKind.TRASHED_LOCAL, path, "Deleted in Drive → moved to ${LocalFs.TRASH_DIR}")
         }
 
         /**
@@ -344,7 +374,8 @@ class SyncEngine(
             download(conflictPath, r.copy(path = conflictPath, md5 = renamed.md5 ?: r.md5, modifiedTime = renamed.modifiedTime), overwrite = null)
             upload(path, l, replaceId = null)
             downloaded--; uploaded--
-            conflicts++
+            conflictNames += conflictName
+            log(LogKind.CONFLICT, path, "Drive version kept as “$conflictName”")
         }
 
         private suspend fun record(path: String, l: LocalEntry, r: RemoteEntry) {
@@ -414,6 +445,7 @@ class SyncEngine(
         private fun summary(): String = buildList {
             if (uploaded > 0) add("↑$uploaded")
             if (downloaded > 0) add("↓$downloaded")
+            val conflicts = conflictNames.size
             if (conflicts > 0) add("$conflicts conflict${if (conflicts > 1) "s" else ""}")
             if (trashedLocal > 0) add("$trashedLocal to phone trash")
             if (trashedRemote > 0) add("$trashedRemote to Drive trash")

@@ -2,6 +2,7 @@ package io.github.hystericmoon.drivesync.ui
 
 import android.text.format.DateUtils
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,14 +14,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -44,13 +49,34 @@ fun PairCard(
     running: String?,
     onSyncNow: () -> Unit,
     onConstraints: (wifiOnly: Boolean, chargingOnly: Boolean) -> Unit,
+    onHistory: () -> Unit,
+    onExcludes: (String) -> Unit,
     onRemove: () -> Unit,
 ) {
     var confirmRemove by remember { mutableStateOf(false) }
+    var editExcludes by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Endpoint(Icons.Outlined.PhoneAndroid, "Phone folder", pair.localName)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { Endpoint(Icons.Outlined.PhoneAndroid, "Phone folder", pair.localName) }
+                Box {
+                    IconButton(onClick = { menu = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "More options for ${pair.localName}")
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Exclude files…") },
+                            onClick = { menu = false; editExcludes = true },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Remove pair") },
+                            onClick = { menu = false; confirmRemove = true },
+                        )
+                    }
+                }
+            }
             Icon(
                 Icons.AutoMirrored.Filled.CompareArrows,
                 contentDescription = "syncs with",
@@ -64,13 +90,29 @@ fun PairCard(
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
             ToggleRow("Wi-Fi only", pair.wifiOnly) { onConstraints(it, pair.chargingOnly) }
             ToggleRow("Only while charging", pair.chargingOnly) { onConstraints(pair.wifiOnly, it) }
+            val excludeCount = pair.excludePatterns.lines().count { it.isNotBlank() && !it.trim().startsWith("#") }
+            if (excludeCount > 0) {
+                Text(
+                    "$excludeCount exclude rule${if (excludeCount > 1) "s" else ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { confirmRemove = true }) { Text("Remove") }
+                TextButton(onClick = onHistory) { Text("History") }
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = onSyncNow, enabled = running == null) { Text("Sync now") }
             }
         }
+    }
+
+    if (editExcludes) {
+        ExcludeDialog(
+            initial = pair.excludePatterns,
+            onDismiss = { editExcludes = false },
+            onSave = { editExcludes = false; onExcludes(it) },
+        )
     }
 
     if (confirmRemove) {

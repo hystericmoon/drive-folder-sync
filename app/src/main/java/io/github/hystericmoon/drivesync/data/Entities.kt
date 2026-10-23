@@ -1,5 +1,6 @@
 package io.github.hystericmoon.drivesync.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -22,6 +23,9 @@ data class FolderPair(
     val lastSyncAt: Long = 0,
     val lastSummary: String? = null,
     val lastError: String? = null,
+    /** Newline-separated ignore patterns, see [io.github.hystericmoon.drivesync.sync.ExcludeRules]. */
+    @ColumnInfo(defaultValue = "")
+    val excludePatterns: String = "",
 )
 
 /**
@@ -53,3 +57,28 @@ data class BaselineEntry(
     val driveMd5: String?,
     val driveModifiedTime: String?,
 )
+
+/** One line in a pair's sync history. Kept to the most recent [SyncLogDao.KEEP] per pair. */
+@Entity(
+    tableName = "sync_log",
+    foreignKeys = [
+        ForeignKey(
+            entity = FolderPair::class,
+            parentColumns = ["id"],
+            childColumns = ["pairId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("pairId")],
+)
+data class SyncLogEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val pairId: Long,
+    val time: Long,
+    val kind: LogKind,
+    /** Relative path, or empty for run-level entries. */
+    val path: String,
+    val detail: String? = null,
+)
+
+enum class LogKind { UPLOADED, DOWNLOADED, CONFLICT, TRASHED_LOCAL, TRASHED_REMOTE, SKIPPED, ERROR }
