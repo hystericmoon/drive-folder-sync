@@ -493,6 +493,31 @@ class SyncScenarioTest {
         assertEquals("E2", String(h.drive.item(synced).content))
     }
 
+    @Test fun driveNamesThePhoneCantHoldAreSkippedWithoutBlockingTheSync() {
+        seeded()
+        h.drive.write("Meeting 10:30.txt", "m")
+        h.drive.write("docs/What?.pdf", "w")
+        h.drive.write("no-ext.", "n")
+        h.drive.write("ok.txt", "ok")
+        val token = h.pair().changesPageToken
+        h.syncViaChanges()
+        assertEquals("ok", h.phone.read("ok.txt"))
+        val error = h.pair().lastError!!
+        assertTrue(error, error.startsWith("3 skipped"))
+        assertTrue(error, error.contains("Meeting 10:30.txt: the name contains “:”, which a phone folder can't hold; rename it in Drive"))
+        assertTrue(error, error.contains("no-ext.: the name ends with a dot"))
+        // A skip isn't a failure: the Changes token moves on and later runs stay clean.
+        assertTrue(h.pair().changesPageToken != token)
+        h.drive.write("later.txt", "L")
+        h.syncViaChanges()
+        assertEquals("L", h.phone.read("later.txt"))
+        assertTrue(h.pair().lastError!!.startsWith("3 skipped"))
+        // Renamed in Drive: it syncs.
+        h.drive.renamePath("Meeting 10:30.txt", "Meeting 10.30.txt")
+        h.syncViaChanges()
+        assertEquals("m", h.phone.read("Meeting 10.30.txt"))
+    }
+
     @Test fun caseCollidingNamesInDrive() {
         h.drive.write("Report.txt", "upper")
         h.drive.write("report.txt", "lower")

@@ -57,8 +57,8 @@ class RemoteTree(private val rootId: String) {
             val shown = if (parent.isNullOrEmpty()) node.name else "$parent/${node.name}"
             val result = when {
                 parent == null -> null
-                !isValidName(node.name) -> null.also {
-                    skipped += Skipped(shown, "the name isn't allowed on a phone; rename it in Drive")
+                phoneNameProblem(node.name) != null -> null.also {
+                    skipped += Skipped(shown, "${phoneNameProblem(node.name)}, which a phone folder can't hold; rename it in Drive")
                 }
                 // Our local trash folder is never synced, even if someone creates one in Drive.
                 parent.isEmpty() && node.name == ".sync-trash" -> null.also {
@@ -120,8 +120,24 @@ class RemoteTree(private val rootId: String) {
     companion object {
         private const val MAX_DEPTH = 64
 
-        fun isValidName(name: String) =
-            name.isNotEmpty() && name != "." && name != ".." && name.none { it == '/' || it == '\u0000' }
+        /** Characters Android's storage provider replaces (FAT rules, also on internal storage). */
+        private const val UNSAFE_CHARS = "\"*/:<>?\\|"
+
+        /**
+         * Why the phone can't store a file under exactly this name, or null if it can. The storage
+         * provider silently changes such names (`a:b` → `a_b`, a trailing dot dropped), which would
+         * make the copy fail on every run. `SafLocalFsDeviceTest` checks this list against the real provider.
+         */
+        fun phoneNameProblem(name: String): String? {
+            val bad = name.firstOrNull { it in UNSAFE_CHARS || it < ' ' || it == '\u007f' }
+            return when {
+                name.isEmpty() || name == "." || name == ".." -> "the name is empty or reserved"
+                bad != null -> if (bad < ' ' || bad == '\u007f') "the name contains a control character" else "the name contains “$bad”"
+                name.endsWith('.') -> "the name ends with a dot"
+                name.toByteArray(Charsets.UTF_8).size > 255 -> "the name is longer than 255 bytes"
+                else -> null
+            }
+        }
 
         fun DriveFile.toNode() = Node(id, name, parentId, isFolder, md5, modifiedTime, size, mimeType)
     }

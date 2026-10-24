@@ -2,6 +2,7 @@ package io.github.hystericmoon.drivesync.device
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.hystericmoon.drivesync.local.LocalFs
+import io.github.hystericmoon.drivesync.sync.RemoteTree
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -44,10 +45,29 @@ class SafLocalFsDeviceTest {
     @Test fun awkwardNamesAreCreatedExactly() {
         val names = listOf(
             "README", "photo.JPG", "archive.tar.gz", "notes.md", "data.weird-ext", "Spaces and ünïcode.txt",
-            "file #1 (final).pdf", ".hidden", "no-ext.", "IMG_0001.HEIC", "song.mp3", "movie.mkv",
+            "file #1 (final).pdf", ".hidden", "IMG_0001.HEIC", "song.mp3", "movie.mkv", "trailing space ",
         )
         for (name in names) fs.createFile(fs.rootDocId, name)
         assertEquals(names.toSortedSet(), fs.children(fs.rootDocId, "").map { it.name }.toSortedSet())
+    }
+
+    /**
+     * The provider silently changes some names. The engine must skip exactly those (as Drive-side
+     * names it can't copy), or they fail on every run. This keeps RemoteTree's rule honest.
+     */
+    @Test fun phoneNameRuleMatchesTheRealProvider() {
+        val probes = listOf(
+            "a:b.txt", "a*b.txt", "a?b.txt", "a\"b.txt", "a<b.txt", "a>b.txt", "a|b.txt", "a\\b.txt",
+            "dot-at-end.", "two dots..", "tab\tinside.txt", "space at end ", " space first.txt",
+            "a%b.txt", "a&b.txt", "a'b.txt", "a;b.txt", "a=b.txt", "a+b.txt", "a,b.txt", "[x]{y}.txt", "emoji 🙂.txt",
+            "x".repeat(251) + ".txt", "é".repeat(126) + ".txt", "é".repeat(128) + ".txt",
+        )
+        val mismatches = probes.mapNotNull { name ->
+            val ruleSaysOk = RemoteTree.phoneNameProblem(name) == null
+            val providerOk = runCatching { fs.createFile(fs.rootDocId, name) }.isSuccess
+            if (ruleSaysOk == providerOk) null else "\"$name\": rule ${if (ruleSaysOk) "allows" else "rejects"}, provider ${if (providerOk) "keeps it" else "changes it"}"
+        }
+        assertTrue(mismatches.joinToString("\n"), mismatches.isEmpty())
     }
 
     @Test fun nameClashFailsWithoutLeavingACopyBehind() {

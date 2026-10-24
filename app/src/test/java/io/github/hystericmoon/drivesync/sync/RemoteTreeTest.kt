@@ -66,6 +66,16 @@ class RemoteTreeTest {
         t.put(node("c", "inside.txt", "b"))
         assertTrue(t.resolve(emptySet()).isEmpty())
         // Both are reported once (the trash folder's contents aren't listed one by one).
+        assertTrue(t.skipped.first { it.path == "bad/name" }.reason.contains("“/”"))
         assertEquals(setOf("bad/name", ".sync-trash"), t.skipped.map { it.path }.toSet())
+    }
+
+    @Test fun namesThePhoneCantHold() {
+        for (bad in listOf("a:b", "a*b", "a?b", "a\"b", "a<b", "a>b", "a|b", "a\\b", "a/b", "dot.", "tab\tx", "", ".", "..", "x".repeat(256), "é".repeat(128))) {
+            assertTrue("should reject \"$bad\"", RemoteTree.phoneNameProblem(bad) != null)
+        }
+        for (ok in listOf("photo.JPG", ".hidden", "a%b&c'd;e=f+g,h.txt", "[x]{y}.txt", "emoji 🙂.txt", "x".repeat(255), "é".repeat(127))) {
+            assertEquals("should accept \"$ok\"", null, RemoteTree.phoneNameProblem(ok))
+        }
     }
 }

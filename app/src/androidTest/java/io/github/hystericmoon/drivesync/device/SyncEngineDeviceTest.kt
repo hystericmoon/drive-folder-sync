@@ -103,6 +103,19 @@ class SyncEngineDeviceTest {
         assertEquals(before, folder.allFiles())
     }
 
+    @Test fun driveNamesThePhoneCantHoldAreSkippedNotFailed() {
+        drive.write("Meeting 10:30.txt", "m")
+        drive.write("What?.pdf", "w")
+        drive.write("no-ext.", "n")
+        drive.write("fine.txt", "f")
+        clock.advance(Duration.ofMinutes(15))
+        runBlocking { engine.sync(pairId) }
+        val pair = runBlocking { db.pairs().get(pairId)!! }
+        assertTrue(pair.lastError, pair.lastError!!.startsWith("3 skipped"))
+        assertTrue("first sync completes", pair.initialSyncDone)
+        assertEquals(mapOf("fine.txt" to "f"), phoneFiles())
+    }
+
     @Test fun driveFolderRenameOnRealStorage() {
         drive.write("Projects/a.txt", "A")
         drive.write("Projects/sub/b.txt", "B")
