@@ -38,6 +38,8 @@ PY
 
 adb uninstall "$PKG" > /dev/null 2>&1 || true # the debug build from the tests has another signature
 adb install "$APK"
+# The app asks for notification permission on first launch; grant it so the dialog doesn't cover the tabs.
+adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS || true
 adb logcat -c
 adb shell am start -W -n "$PKG/.MainActivity"
 sleep 10
