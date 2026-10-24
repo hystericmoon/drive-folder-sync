@@ -2,6 +2,7 @@ package io.github.hystericmoon.drivesync.device
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.DocumentsContract
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,10 +43,13 @@ class SharedStorageFolder : ExternalResource() {
         for (child in fs.children(fs.rootDocId, "")) fs.delete(child.docId)
     }
 
-    /** Reuses the grant from an earlier test, or walks the picker once: "Use this folder", then "Allow". */
+    /** Reuses the grant from an earlier test, or walks the picker: "Use this folder", then "Allow". One retry. */
     private fun grantedTree(): Uri {
         resolver.persistedUriPermissions.firstOrNull { it.uri.toString().endsWith(Uri.encode(FOLDER)) }?.let { return it.uri }
+        return runCatching { pickTree() }.getOrElse { pickTree() }
+    }
 
+    private fun pickTree(): Uri {
         val initial = DocumentsContract.buildDocumentUri(AUTHORITY, FOLDER)
         val picked = CountDownLatch(1)
         var result: Uri? = null
@@ -56,11 +60,18 @@ class SharedStorageFolder : ExternalResource() {
                     .launch(initial)
             }
             val device = UiDevice.getInstance(instrumentation)
-            // Android 11+ says "Use this folder"; Android 10 says "Select" or "Allow access to …".
-            device.wait(Until.findObject(By.text(Pattern.compile("(?i)(use this folder|select|allow access.*)"))), 20_000)?.click()
-                ?: error("folder picker didn't show its confirm button")
-            // Then a confirmation dialog ("Allow"), where the version shows one.
-            device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 10_000)?.click()
+            if (Build.VERSION.SDK_INT >= 30) {
+                // Android 11+: "Use this folder", then always an "Allow" dialog.
+                device.wait(Until.findObject(By.text(Pattern.compile("(?i)use this folder"))), 20_000)?.click()
+                    ?: error("folder picker didn't show \"Use this folder\"")
+                device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 10_000)?.click()
+                    ?: error("folder picker didn't ask to allow access")
+            } else {
+                // Android 10 words it differently, and may or may not ask again.
+                device.wait(Until.findObject(By.text(Pattern.compile("(?i)(select|allow access.*)"))), 20_000)?.click()
+                    ?: error("folder picker didn't show its confirm button")
+                device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 10_000)?.click()
+            }
             check(picked.await(15, TimeUnit.SECONDS)) { "no result from the folder picker" }
         }
         val uri = checkNotNull(result) { "folder picker returned nothing" }
