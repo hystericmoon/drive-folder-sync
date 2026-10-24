@@ -33,8 +33,7 @@ class SyncEngineDeviceTest {
     private val engine = SyncEngine(
         folder.context, db,
         newDrive = { drive },
-        // The test reaches the folder through borrowed shell permissions, not a persisted grant.
-        openLocal = { object : LocalFs by folder.fs { override fun hasPermission() = true } },
+        openLocal = { folder.fs },
         clock = clock,
     )
     private val pairId by lazy {

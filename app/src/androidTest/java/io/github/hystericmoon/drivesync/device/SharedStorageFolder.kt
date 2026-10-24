@@ -1,18 +1,25 @@
 package io.github.hystericmoon.drivesync.device
 
+import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
-import android.provider.DocumentsContract.Document
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
 import io.github.hystericmoon.drivesync.local.SafLocalFs
 import org.junit.rules.ExternalResource
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.regex.Pattern
 
 /**
- * A fresh folder in the emulator's shared storage (Download/), reached through Android's real
- * ExternalStorageProvider, the same provider the app gets from the folder picker on the phone.
- *
- * The picker can't be driven reliably from a test, so the test borrows the shell's permissions
- * (which include MANAGE_DOCUMENTS) instead of a user grant. Everything else is the real code path.
+ * An emptied folder in the emulator's shared storage (Download/drivesync-ci), granted to the app
+ * through the real system folder picker, exactly as on the phone, and reached through Android's
+ * real ExternalStorageProvider. CI creates the folder with adb before the tests start.
  */
 class SharedStorageFolder : ExternalResource() {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -21,20 +28,43 @@ class SharedStorageFolder : ExternalResource() {
 
     lateinit var treeUri: Uri private set
     lateinit var fs: SafLocalFs private set
-    private lateinit var folderUri: Uri
 
     override fun before() {
-        instrumentation.uiAutomation.adoptShellPermissionIdentity()
-        val download = DocumentsContract.buildDocumentUri(AUTHORITY, "primary:Download")
-        folderUri = DocumentsContract.createDocument(resolver, download, Document.MIME_TYPE_DIR, "drivesync-test-${System.nanoTime()}")
-            ?: error("could not create a test folder in Download/")
-        treeUri = DocumentsContract.buildTreeDocumentUri(AUTHORITY, DocumentsContract.getDocumentId(folderUri))
+        treeUri = grantedTree()
         fs = SafLocalFs(context, treeUri)
+        check(fs.hasPermission()) { "no persisted permission for $treeUri" }
+        clear()
     }
 
-    override fun after() {
-        runCatching { DocumentsContract.deleteDocument(resolver, folderUri) }
-        instrumentation.uiAutomation.dropShellPermissionIdentity()
+    override fun after() = clear()
+
+    private fun clear() {
+        for (child in fs.children(fs.rootDocId, "")) fs.delete(child.docId)
+    }
+
+    /** Reuses the grant from an earlier test, or walks the picker once: "Use this folder", then "Allow". */
+    private fun grantedTree(): Uri {
+        resolver.persistedUriPermissions.firstOrNull { it.uri.toString().endsWith(Uri.encode(FOLDER)) }?.let { return it.uri }
+
+        val initial = DocumentsContract.buildDocumentUri(AUTHORITY, FOLDER)
+        val picked = CountDownLatch(1)
+        var result: Uri? = null
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.activityResultRegistry
+                    .register("tree", ActivityResultContracts.OpenDocumentTree()) { uri -> result = uri; picked.countDown() }
+                    .launch(initial)
+            }
+            val device = UiDevice.getInstance(instrumentation)
+            device.wait(Until.findObject(By.text(Pattern.compile("(?i)use this folder"))), 20_000)?.click()
+                ?: error("folder picker didn't show \"Use this folder\"")
+            device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 10_000)?.click()
+                ?: error("folder picker didn't ask to allow access")
+            check(picked.await(15, TimeUnit.SECONDS)) { "no result from the folder picker" }
+        }
+        val uri = checkNotNull(result) { "folder picker returned nothing" }
+        resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        return uri
     }
 
     // ---- helpers acting "as the user", through the same provider ----
@@ -80,5 +110,6 @@ class SharedStorageFolder : ExternalResource() {
 
     companion object {
         const val AUTHORITY = "com.android.externalstorage.documents"
+        const val FOLDER = "primary:Download/drivesync-ci"
     }
 }

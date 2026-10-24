@@ -23,8 +23,11 @@ class RemoteTree(private val rootId: String) {
 
     private val nodes = HashMap<String, Node>()
 
-    /** Names we couldn't map to a local path (duplicates, invalid characters). */
-    val skipped = mutableListOf<String>()
+    /** A Drive item left out of the snapshot, with a reason the user can act on. */
+    data class Skipped(val path: String, val reason: String)
+
+    /** Items we couldn't map to a phone path (duplicate names, names the phone can't hold). */
+    val skipped = mutableListOf<Skipped>()
 
     fun put(node: Node) { nodes[node.id] = node }
 
@@ -51,11 +54,16 @@ class RemoteTree(private val rootId: String) {
             if (pathCache.containsKey(id)) return null
             val node = nodes[id] ?: return null
             val parent = node.parentId?.let { pathOf(it, depth + 1) }
+            val shown = if (parent.isNullOrEmpty()) node.name else "$parent/${node.name}"
             val result = when {
                 parent == null -> null
-                !isValidName(node.name) -> null
+                !isValidName(node.name) -> null.also {
+                    skipped += Skipped(shown, "the name isn't allowed on a phone; rename it in Drive")
+                }
                 // Our local trash folder is never synced, even if someone creates one in Drive.
-                parent.isEmpty() && node.name == ".sync-trash" -> null
+                parent.isEmpty() && node.name == ".sync-trash" -> null.also {
+                    skipped += Skipped(shown, "this name is reserved for the app's phone trash; rename it in Drive")
+                }
                 parent.isEmpty() -> node.name
                 else -> "$parent/${node.name}"
             }
@@ -68,8 +76,14 @@ class RemoteTree(private val rootId: String) {
         for (node in ordered) {
             val path = pathOf(node.id, 0) ?: continue
             val key = path.lowercase()
-            if (byKey.containsKey(key)) {
-                skipped += path
+            val winner = byKey[key]?.first
+            if (winner != null) {
+                skipped += Skipped(
+                    path,
+                    if (winner == path) "another item in this Drive folder has the same name; rename or remove one in Drive"
+                    else "“${winner.substringAfterLast('/')}” is in the same Drive folder and differs only in upper/lower case, " +
+                        "which a phone can't keep apart; rename one in Drive",
+                )
                 continue
             }
             byKey[key] = path to node
@@ -84,7 +98,11 @@ class RemoteTree(private val rootId: String) {
             return accepted.getOrPut(id) { nodes[id]?.parentId?.let { isAccepted(it, depth + 1) } ?: false }
         }
         return byKey.values
-            .filter { (path, node) -> isAccepted(node.id, 0).also { ok -> if (!ok) skipped += path } }
+            .filter { (path, node) ->
+                isAccepted(node.id, 0).also { ok ->
+                    if (!ok) skipped += Skipped(path, "a folder above it was skipped because of its name")
+                }
+            }
             .associate { (path, node) ->
                 path to RemoteEntry(
                     path = path,

@@ -119,4 +119,48 @@ class PlannerTest {
     @Test fun fileFolderClashIsSkipped() {
         plan(listOf(local("a")), listOf(remote("a", dir = true))).single<Action.Skip>()
     }
+
+    // ---- names differing only by case ----
+
+    @Test fun newPhoneAndDriveNamesDifferingByCaseAreBothSkipped() {
+        val actions = plan(l = listOf(local("Notes.txt", size = 1)), r = listOf(remote("notes.txt")))
+        assertEquals(setOf("Notes.txt", "notes.txt"), actions.map { it.path }.toSet())
+        assertTrue(actions.all { it is Action.Skip })
+        assertTrue((actions.first() as Action.Skip).reason.contains("upper/lower case"))
+    }
+
+    @Test fun caseClashingFoldersSkipEverythingInside() {
+        val actions = plan(
+            l = listOf(local("Photos", dir = true), local("Photos/a.jpg"), local("other.txt")),
+            r = listOf(remote("photos", dir = true), remote("photos/b.jpg")),
+        )
+        val skipped = actions.filterIsInstance<Action.Skip>().map { it.path }.toSet()
+        assertEquals(setOf("Photos", "Photos/a.jpg", "photos", "photos/b.jpg"), skipped)
+        assertEquals(listOf("other.txt"), actions.filterNot { it is Action.Skip }.map { it.path })
+    }
+
+    @Test fun renameByCaseOnThePhoneIsNotAClash() {
+        // notes.txt was synced; the phone now calls it Notes.txt: old name to Drive trash, new name uploaded.
+        val actions = plan(l = listOf(local("Notes.txt")), r = listOf(remote("notes.txt")), b = listOf(base("notes.txt")))
+        assertTrue(actions.none { it is Action.Skip })
+        assertTrue(actions.any { it is Action.TrashRemote && it.path == "notes.txt" })
+        assertTrue(actions.any { it is Action.Upload && it.path == "Notes.txt" })
+    }
+
+    @Test fun renameByCaseInDriveIsNotAClash() {
+        val actions = plan(l = listOf(local("notes.txt")), r = listOf(remote("Notes.txt")), b = listOf(base("notes.txt")))
+        // The old name goes to .sync-trash before the new one is created, or the phone would refuse it.
+        assertEquals(listOf("notes.txt", "Notes.txt"), actions.map { it.path })
+        assertTrue(actions[0] is Action.TrashLocal)
+        assertTrue(actions[1] is Action.Download)
+    }
+
+    @Test fun trashMovesComeBeforeCopies() {
+        val actions = plan(
+            l = listOf(local("a.txt"), local("z.txt")),
+            r = listOf(remote("b.txt"), remote("y.txt")),
+            b = listOf(base("y.txt"), base("z.txt")),
+        )
+        assertEquals(listOf("y.txt", "z.txt", "a.txt", "b.txt"), actions.map { it.path })
+    }
 }

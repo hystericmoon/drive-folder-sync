@@ -112,8 +112,8 @@ class SyncEngine internal constructor(
         private val excludes = ExcludeRules(pair.excludePatterns)
         /** Errors: the sync is retried and the Changes cursor is not advanced. */
         private val failures = mutableListOf<String>()
-        /** Permanent, by-design skips (duplicate names, type clashes): reported but don't block progress. */
-        private val warnings = mutableListOf<String>()
+        /** Permanent, by-design skips (duplicate names, type clashes) by path: reported but don't block progress. */
+        private val skips = LinkedHashMap<String, SkipNote>()
 
         suspend fun execute() {
             if (!fs.hasPermission()) throw SyncAbortedException("Lost access to the phone folder. Remove and re-add this pair.")
@@ -133,10 +133,19 @@ class SyncEngine internal constructor(
             val (tree, newToken, fullScan) = remoteSnapshot(baselineRows, now)
             val remote = tree.resolve(baselineRows.mapNotNullTo(HashSet()) { it.driveFileId })
                 .filterKeys { !excludes.isExcluded(it) }
-            tree.skipped.filterNot(excludes::isExcluded).forEach { warn(it, "skipped (duplicate or invalid name in Drive)") }
+            tree.skipped.filterNot { excludes.isExcluded(it.path) }.forEach { warn(it.path, it.reason, block = false) }
 
             progress("Scanning phone folder…")
             val local = fs.listTree().filterKeys { !excludes.isExcluded(it) }
+
+            // A Changes run only sees what changed, so it carries the last full scan's notes forward.
+            // "Hands off" notes stay while the phone item they're about still exists.
+            val localKeys = local.keys.mapTo(HashSet()) { it.lowercase() }
+            val carried = if (fullScan) emptyList() else SkipNote.decode(pair.skippedItems).filter { note ->
+                !excludes.isExcluded(note.path) && (!note.block || note.path.lowercase() in localKeys)
+            }
+            carried.forEach { warn(it.path, it.reason, it.block) }
+            val blocked = carried.filter { it.block }.mapTo(HashSet()) { it.path.lowercase() }
 
             guardAgainstMassDeletion(baselineRows, local, remote)
 
@@ -151,7 +160,7 @@ class SyncEngine internal constructor(
                 remote = remote,
                 baseline = baselineRows.associate { it.path to it.toBase() },
                 allowDeletes = pair.initialSyncDone,
-            )
+            ).filter { it is Action.Skip || !isBlocked(it.path, blocked) }
 
             actions.forEachIndexed { i, action ->
                 setProgress(pair.id, SyncProgress("${verb(action)} ${action.path.substringAfterLast('/')}", i, actions.size))
@@ -182,7 +191,8 @@ class SyncEngine internal constructor(
                     initialSyncDone = latest.initialSyncDone || clean,
                     lastSyncAt = clock.millis(),
                     lastSummary = summary(),
-                    lastError = (failures + warnings).takeIf { it.isNotEmpty() }?.let {
+                    skippedItems = SkipNote.encode(skips.values),
+                    lastError = (failures + skips.values.map { "${it.path}: ${it.reason}" }).takeIf { it.isNotEmpty() }?.let {
                         val head = if (failures.isEmpty()) "${it.size} skipped:" else "${failures.size} failed (will retry):"
                         head + "\n" + it.take(10).joinToString("\n")
                     },
@@ -195,8 +205,8 @@ class SyncEngine internal constructor(
             if (kind == LogKind.ERROR || kind == LogKind.SKIPPED) db.log().insertUnlessRepeat(entry) else db.log().insert(entry)
         }
 
-        private suspend fun warn(path: String, reason: String) {
-            warnings += "$path: $reason"
+        private suspend fun warn(path: String, reason: String, block: Boolean) {
+            skips[path] = SkipNote(path, reason, block)
             log(LogKind.SKIPPED, path, reason)
         }
 
@@ -297,7 +307,7 @@ class SyncEngine internal constructor(
                         recordDir(action.path)
                     }
                 }
-                is Action.Skip -> warn(action.path, action.reason)
+                is Action.Skip -> warn(action.path, action.reason, block = true)
             }
         }
 
@@ -502,6 +512,17 @@ class SyncEngine internal constructor(
         private const val MASS_DELETE_MIN_FILES = 5
 
         private fun parentOf(path: String) = path.substringBeforeLast('/', "")
+
+        /** True if [path] or a folder above it is in [blocked] (lower-cased paths). */
+        private fun isBlocked(path: String, blocked: Set<String>): Boolean {
+            if (blocked.isEmpty()) return false
+            var p = path.lowercase()
+            while (true) {
+                if (p in blocked) return true
+                if ('/' !in p) return false
+                p = p.substringBeforeLast('/')
+            }
+        }
         private fun nameOf(path: String) = path.substringAfterLast('/')
         private fun join(parent: String, name: String) = if (parent.isEmpty()) name else "$parent/$name"
 

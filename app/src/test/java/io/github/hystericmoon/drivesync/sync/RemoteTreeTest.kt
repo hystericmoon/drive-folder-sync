@@ -45,7 +45,18 @@ class RemoteTreeTest {
         t.put(node("c2", "y.txt", "zzz"))
         val resolved = t.resolve(preferredIds = setOf("zzz"))
         assertEquals(setOf("docs", "docs/y.txt"), resolved.keys)
-        assertEquals(setOf("Docs", "Docs/x.txt"), t.skipped.toSet())
+        assertEquals(setOf("Docs", "Docs/x.txt"), t.skipped.map { it.path }.toSet())
+        assertTrue(t.skipped.first { it.path == "Docs" }.reason.contains("“docs”"))
+        assertTrue(t.skipped.first { it.path == "Docs" }.reason.contains("upper/lower case"))
+        assertTrue(t.skipped.first { it.path == "Docs/x.txt" }.reason.contains("folder above"))
+    }
+
+    @Test fun exactDuplicateNamesSaySo() {
+        val t = RemoteTree("root")
+        t.put(node("a1", "same.txt", "root"))
+        t.put(node("a2", "same.txt", "root"))
+        assertEquals(setOf("same.txt"), t.resolve(emptySet()).keys)
+        assertTrue(t.skipped.single().reason.contains("same name"))
     }
 
     @Test fun ignoresInvalidNamesAndTrashFolder() {
@@ -54,5 +65,7 @@ class RemoteTreeTest {
         t.put(node("b", ".sync-trash", "root", dir = true))
         t.put(node("c", "inside.txt", "b"))
         assertTrue(t.resolve(emptySet()).isEmpty())
+        // Both are reported once (the trash folder's contents aren't listed one by one).
+        assertEquals(setOf("bad/name", ".sync-trash"), t.skipped.map { it.path }.toSet())
     }
 }

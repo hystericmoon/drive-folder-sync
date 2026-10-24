@@ -464,18 +464,33 @@ class SyncScenarioTest {
         val dup = h.drive.addDuplicate("docs/e.txt", "second e")
         h.drive.write("x.txt", "X") // something else changes too
         h.syncViaChanges()
-        assertTrue(h.pair().lastError!!.contains("skipped"))
+        assertTrue(h.pair().lastError!!.startsWith("1 skipped"))
+        assertTrue(h.pair().lastError!!.contains("same name"))
         assertTrue(h.log().any { it.kind == LogKind.SKIPPED && it.path == "docs/e.txt" })
+        // The note stays on quick runs, which can't see the duplicate again, and the winner keeps syncing.
+        h.drive.write("docs/e.txt", "E2")
+        h.syncViaChanges()
+        assertTrue(h.pair().lastError!!.contains("same name"))
+        assertEquals("E2", h.phone.read("docs/e.txt"))
         h.clock.advance(Duration.ofHours(25))
         h.syncViaFullScan()
-        assertTrue(h.pair().lastError!!.contains("skipped"))
-        // Known limit: a Changes run only sees what changed, so the "skipped" note clears until the next full scan.
-        h.syncViaChanges()
-        assertEquals("E", h.phone.read("docs/e.txt"))
+        assertTrue(h.pair().lastError!!.contains("same name"))
         assertEquals("X", h.phone.read("x.txt"))
         assertFalse(h.drive.item(dup).trashed)
         assertTrue(h.drive.trashedNames().isEmpty())
         assertTrue(h.phone.trashed().isEmpty())
+
+        // Fixed in Drive: the note clears with the next full scan at the latest.
+        val synced = h.drive.id("docs/e.txt")
+        h.drive.trashPath("docs/e.txt") // the synced one; the duplicate takes its place
+        h.clock.advance(Duration.ofHours(25))
+        h.syncViaFullScan()
+        h.syncViaChanges()
+        h.assertInSync()
+        // Seen as a Drive edit: the phone gets the other file, and the old bytes are safe in Drive's trash.
+        assertEquals("second e", h.phone.read("docs/e.txt"))
+        assertTrue(h.drive.item(synced).trashed)
+        assertEquals("E2", String(h.drive.item(synced).content))
     }
 
     @Test fun caseCollidingNamesInDrive() {
@@ -500,18 +515,62 @@ class SyncScenarioTest {
         seeded()
         h.phone.write("Notes.txt", "phone")
         h.drive.write("notes.txt", "drive")
-        repeat(3) { h.sync() }
-        // The phone can't hold both names. Both versions stay in Drive, the phone keeps its own,
-        // the clash is reported, and the pair keeps syncing everything else.
+        h.syncViaChanges()
+        h.syncViaChanges() // can't see notes.txt in Drive any more, and must still not upload Notes.txt
+        h.syncViaChanges()
+        // Neither is copied (that would put both names on one side); each side keeps its own.
         assertEquals("phone", h.phone.read("Notes.txt"))
-        assertEquals("phone", h.drive.files()["Notes.txt"])
-        assertEquals("drive", h.drive.files()["notes.txt"])
-        assertTrue(h.log().any { it.kind == LogKind.SKIPPED && it.path == "notes.txt" })
+        assertEquals(mapOf("notes.txt" to "drive"), h.drive.files().filterKeys { it.equals("notes.txt", ignoreCase = true) })
+        val error = h.pair().lastError!!
+        assertTrue(error, error.startsWith("2 skipped"))
+        assertTrue(error, error.contains("“Notes.txt” on the phone and “notes.txt” in Drive differ only in upper/lower case"))
+        // Everything else keeps syncing, and the run counts as clean.
         h.drive.write("later.txt", "L")
-        h.sync()
+        h.syncViaChanges()
         assertEquals("L", h.phone.read("later.txt"))
+
+        // The user renames the phone copy: it syncs, and the Drive one arrives with the next full scan.
+        h.phone.rename("Notes.txt", "Notes (phone).txt")
+        h.syncViaChanges()
+        assertEquals("phone", h.drive.files()["Notes (phone).txt"])
+        h.clock.advance(Duration.ofHours(25))
+        h.syncViaFullScan()
+        h.assertInSync()
+        assertEquals("drive", h.phone.read("notes.txt"))
         assertTrue(h.drive.trashedNames().isEmpty())
         h.assertNoPermanentDeletes()
+    }
+
+    @Test fun caseClashingNewFoldersAreLeftAlone() {
+        seeded()
+        h.phone.write("Music/a.mp3", "A")
+        h.drive.write("music/b.mp3", "B")
+        h.syncViaChanges()
+        h.phone.write("Music/new.mp3", "N") // added later, inside the clashing folder
+        h.syncViaChanges()
+        // Nothing crosses in either direction, so neither side ends up with both folder names.
+        assertEquals(setOf("music/b.mp3"), h.drive.files().keys.filter { it.startsWith("music", ignoreCase = true) }.toSet())
+        assertFalse(h.drive.folders().contains("Music"))
+        assertEquals(setOf("Music/a.mp3", "Music/new.mp3"), h.phone.files().keys.filter { it.startsWith("music", ignoreCase = true) }.toSet())
+        assertTrue(h.pair().lastError!!.contains("upper/lower case"))
+    }
+
+    @Test fun renameThatOnlyChangesCaseInDrive() {
+        seeded()
+        h.drive.renamePath("a.txt", "A.txt")
+        h.syncViaChanges()
+        h.assertInSync()
+        assertEquals("A", h.phone.read("A.txt"))
+        assertEquals(mapOf("a.txt" to "A"), h.phone.trashed())
+    }
+
+    @Test fun renameThatOnlyChangesCaseOnThePhone() {
+        seeded()
+        h.phone.rename("d.txt", "D.txt")
+        h.syncViaChanges()
+        h.assertInSync()
+        assertEquals("D", h.drive.files()["D.txt"])
+        assertTrue("d.txt" in h.drive.trashedNames())
     }
 
     // ---- failures in the middle of a run ----

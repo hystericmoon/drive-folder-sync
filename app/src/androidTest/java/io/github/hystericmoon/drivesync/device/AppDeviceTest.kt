@@ -40,7 +40,7 @@ class AppDeviceTest {
             compose.onAllNodes(hasText("Sign in to start").or(hasText("Not configured"))).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("Settings").performClick()
-        compose.waitUntil(5_000) { compose.onAllNodesWithText("Check for updates").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Not signed in").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("History").performClick()
         compose.onNodeWithText("Folders").performClick()
         compose.waitUntil(5_000) {
@@ -54,9 +54,16 @@ class AppDeviceTest {
         Notifier.createChannels(context)
         Notifier.conflicts(context, pairId = 4242, pairName = "Camera", conflictNames = listOf("a (conflict 2026-10-23).jpg"))
         Notifier.needsSignIn(context)
-        val titles = nm.activeNotifications.map { it.notification.extras.getCharSequence("android.title").toString() }
-        assertTrue(titles.toString(), "Conflict in Camera" in titles)
-        assertTrue(titles.toString(), "Drive sync is paused" in titles)
+        // Posting is asynchronous; give the system a moment to list both.
+        val expected = setOf("Conflict in Camera", "Drive sync is paused")
+        var titles = emptySet<String>()
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            titles = nm.activeNotifications.mapTo(HashSet()) { it.notification.extras.getCharSequence("android.title").toString() }
+            if (titles.containsAll(expected)) break
+            Thread.sleep(100)
+        }
+        assertTrue(titles.toString(), titles.containsAll(expected))
         nm.cancelAll()
     }
 

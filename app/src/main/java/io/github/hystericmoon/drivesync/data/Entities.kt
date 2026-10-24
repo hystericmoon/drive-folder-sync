@@ -26,6 +26,9 @@ data class FolderPair(
     /** Newline-separated ignore patterns, see [io.github.hystericmoon.drivesync.sync.ExcludeRules]. */
     @ColumnInfo(defaultValue = "")
     val excludePatterns: String = "",
+    /** What the last full scan skipped, carried into quicker runs ([io.github.hystericmoon.drivesync.sync.SkipNote], JSON). */
+    @ColumnInfo(defaultValue = "")
+    val skippedItems: String = "",
 ) {
     /**
      * New exclude rules. Changed rules make the next sync list Drive in full: the Changes feed

@@ -1,0 +1,287 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 3,
+    "identityHash": "cfc12ff2fbf4ddf65dab36de73d895f0",
+    "entities": [
+      {
+        "tableName": "folder_pairs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `localTreeUri` TEXT NOT NULL, `localName` TEXT NOT NULL, `driveFolderId` TEXT NOT NULL, `driveFolderName` TEXT NOT NULL, `wifiOnly` INTEGER NOT NULL, `chargingOnly` INTEGER NOT NULL, `initialSyncDone` INTEGER NOT NULL, `changesPageToken` TEXT, `lastFullScanAt` INTEGER NOT NULL, `lastSyncAt` INTEGER NOT NULL, `lastSummary` TEXT, `lastError` TEXT, `excludePatterns` TEXT NOT NULL DEFAULT '', `skippedItems` TEXT NOT NULL DEFAULT '')",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localTreeUri",
+            "columnName": "localTreeUri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localName",
+            "columnName": "localName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "driveFolderId",
+            "columnName": "driveFolderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "driveFolderName",
+            "columnName": "driveFolderName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wifiOnly",
+            "columnName": "wifiOnly",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chargingOnly",
+            "columnName": "chargingOnly",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "initialSyncDone",
+            "columnName": "initialSyncDone",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "changesPageToken",
+            "columnName": "changesPageToken",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastFullScanAt",
+            "columnName": "lastFullScanAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSyncAt",
+            "columnName": "lastSyncAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSummary",
+            "columnName": "lastSummary",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "excludePatterns",
+            "columnName": "excludePatterns",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "skippedItems",
+            "columnName": "skippedItems",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "baseline",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pairId` INTEGER NOT NULL, `path` TEXT NOT NULL, `isDir` INTEGER NOT NULL, `localDocId` TEXT, `localSize` INTEGER NOT NULL, `localLastModified` INTEGER NOT NULL, `driveFileId` TEXT, `driveParentId` TEXT, `driveMd5` TEXT, `driveModifiedTime` TEXT, PRIMARY KEY(`pairId`, `path`), FOREIGN KEY(`pairId`) REFERENCES `folder_pairs`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "pairId",
+            "columnName": "pairId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "path",
+            "columnName": "path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isDir",
+            "columnName": "isDir",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localDocId",
+            "columnName": "localDocId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "localSize",
+            "columnName": "localSize",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localLastModified",
+            "columnName": "localLastModified",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "driveFileId",
+            "columnName": "driveFileId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "driveParentId",
+            "columnName": "driveParentId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "driveMd5",
+            "columnName": "driveMd5",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "driveModifiedTime",
+            "columnName": "driveModifiedTime",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "pairId",
+            "path"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_baseline_pairId",
+            "unique": false,
+            "columnNames": [
+              "pairId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_baseline_pairId` ON `${TABLE_NAME}` (`pairId`)"
+          },
+          {
+            "name": "index_baseline_pairId_driveFileId",
+            "unique": false,
+            "columnNames": [
+              "pairId",
+              "driveFileId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_baseline_pairId_driveFileId` ON `${TABLE_NAME}` (`pairId`, `driveFileId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "folder_pairs",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pairId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "sync_log",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `pairId` INTEGER NOT NULL, `time` INTEGER NOT NULL, `kind` TEXT NOT NULL, `path` TEXT NOT NULL, `detail` TEXT, FOREIGN KEY(`pairId`) REFERENCES `folder_pairs`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pairId",
+            "columnName": "pairId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "time",
+            "columnName": "time",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "path",
+            "columnName": "path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detail",
+            "columnName": "detail",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_log_pairId",
+            "unique": false,
+            "columnNames": [
+              "pairId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_log_pairId` ON `${TABLE_NAME}` (`pairId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "folder_pairs",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pairId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'cfc12ff2fbf4ddf65dab36de73d895f0')"
+    ]
+  }
+}

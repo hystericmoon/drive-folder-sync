@@ -32,11 +32,11 @@ jobs:
       # Runs before anything is built or published: a failing test stops the release, so the
       # app never auto-updates to it. Includes the end-to-end sync engine scenarios.
       - name: Run tests (a failure blocks the release)
-        run: ./gradlew --no-daemon testReleaseUnitTest
+        run: ./gradlew --no-daemon testDebugUnitTest
 
       - name: List failed tests
         if: failure()
-        run: python3 .github/scripts/test-summary.py "Unit tests failed, so nothing was released" "app/build/test-results/testReleaseUnitTest/*.xml"
+        run: python3 .github/scripts/test-summary.py "Unit tests failed, so nothing was released" "app/build/test-results/testDebugUnitTest/*.xml"
 
       - name: Restore signing keystore
         env:
@@ -129,6 +129,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
+            adb shell mkdir -p /sdcard/Download/drivesync-ci
             ./gradlew --no-daemon connectedDebugAndroidTest
             bash .github/scripts/smoke-release.sh app/build/outputs/apk/release/app-release.apk
 
