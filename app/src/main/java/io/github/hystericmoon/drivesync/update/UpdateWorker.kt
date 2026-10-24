@@ -21,7 +21,15 @@ class UpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             )
             return Result.success()
         }
-        return runCatching { updater.downloadAndInstall(update) }
-            .fold(onSuccess = { Result.success() }, onFailure = { Result.retry() })
+        return try {
+            updater.downloadAndInstall(update)
+            Result.success()
+        } catch (e: SecurityException) {
+            // Wrong key or wrong app: retrying won't help. Say so and wait for the next release.
+            Notifier.update(applicationContext, "Update ${update.versionName} not installed", e.message ?: "Signature check failed.", null)
+            Result.success()
+        } catch (e: Exception) {
+            Result.retry()
+        }
     }
 }

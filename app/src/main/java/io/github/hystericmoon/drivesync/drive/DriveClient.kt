@@ -106,10 +106,18 @@ interface DriveApi {
  * Minimal Drive v3 REST client. Plain OkHttp keeps the APK small and gives full control over
  * resumable uploads from content:// streams.
  */
-class DriveClient(
+class DriveClient internal constructor(
     private val token: suspend () -> String,
     private val invalidateToken: suspend (String) -> Unit,
+    private val apiBase: String,
+    private val uploadBase: String,
+    /** Must be a multiple of 256 KiB for real Drive; tests use tiny chunks. */
+    private val chunkSize: Int,
+    private val backoffMs: (attempt: Int) -> Long,
 ) : DriveApi {
+    constructor(token: suspend () -> String, invalidateToken: suspend (String) -> Unit) :
+        this(token, invalidateToken, API_BASE, UPLOAD_BASE, CHUNK_SIZE, ::defaultBackoffMs)
+
     private val http = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
@@ -237,7 +245,7 @@ class DriveClient(
         var offset = 0L
         var stream: InputStream? = null
         var failures = 0
-        val buffer = ByteArray(CHUNK_SIZE)
+        val buffer = ByteArray(chunkSize)
         try {
             while (true) {
                 if (stream == null) {
@@ -246,7 +254,7 @@ class DriveClient(
                     stream = open()
                     stream.skipThroughDigest(offset, digest, buffer)
                 }
-                val chunkLen = minOf(CHUNK_SIZE.toLong(), size - offset).toInt()
+                val chunkLen = minOf(chunkSize.toLong(), size - offset).toInt()
                 val read = stream.readFully(buffer, chunkLen)
                 if (read != chunkLen) throw IOException("Local file shrank during upload")
                 val range = if (size == 0L) "bytes */0" else "bytes $offset-${offset + chunkLen - 1}/$size"
@@ -311,7 +319,7 @@ class DriveClient(
     ): String {
         val meta = JSONObject().put("name", name)
         if (existingId == null && parentId != null) meta.put("parents", JSONArray().put(parentId))
-        val url = (UPLOAD_BASE + if (existingId == null) "files" else "files/$existingId").toHttpUrl().newBuilder()
+        val url = (uploadBase + if (existingId == null) "files" else "files/$existingId").toHttpUrl().newBuilder()
             .addQueryParameter("uploadType", "resumable")
             .fields()
             .build()
@@ -360,7 +368,7 @@ class DriveClient(
 
     // ---- plumbing ----
 
-    private fun api(path: String): HttpUrl.Builder = (API_BASE + path).toHttpUrl().newBuilder()
+    private fun api(path: String): HttpUrl.Builder = (apiBase + path).toHttpUrl().newBuilder()
 
     private fun HttpUrl.Builder.fields() = addQueryParameter("fields", DriveFile.FIELDS)
 
@@ -413,7 +421,7 @@ class DriveClient(
         private val JSON = "application/json; charset=utf-8".toMediaType()
 
         private fun JSONObject.toJsonBody() = toString().toRequestBody(JSON)
-        private fun backoffMs(attempt: Int) = (1000L shl (attempt - 1).coerceAtMost(5)) + (0..500).random()
+        private fun defaultBackoffMs(attempt: Int) = (1000L shl (attempt - 1).coerceAtMost(5)) + (0..500).random()
     }
 }
 
