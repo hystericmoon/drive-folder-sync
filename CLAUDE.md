@@ -8,12 +8,16 @@ CI builds the APK, and the app updates itself from GitHub Releases. Read `README
 ## Status
 
 - Installed and syncing on the owner's phone. The owner has said they will **not** run manual device tests.
-- **Never verified on a device:** the v0.1.9 UI redesign (glass, animations, tabs), sync history,
-  notifications, exclude rules, and the self-update flow. Verify with the unit and screenshot tests below,
-  and keep changes conservative.
-- The sync engine is covered end to end by `SyncScenarioTest` (fakes in `test/…/sync/fakes/`). Any change to
-  `SyncEngine`, `Planner`, `RemoteTree`, `LocalFs` or `DriveApi` behaviour needs a scenario there. CI runs all unit
-  tests in their own step before building, and a failure blocks the release.
+- **Never verified on a real phone:** the v0.1.9 UI redesign (glass, animations, tabs), sync history,
+  exclude rules, and the actual install step of self-update. Keep changes conservative.
+- Tests are the safety net (see README → Tests). The sync engine is covered end to end by `SyncScenarioTest` (fakes in
+  `test/…/sync/fakes/` and `sharedTest/`). Any change to `SyncEngine`, `Planner`, `RemoteTree`, `LocalFs` or `DriveApi`
+  behaviour needs a scenario there. `DriveClientTest`/`UpdaterTest` cover the network code with MockWebServer.
+- Emulator tests (`androidTest/`) can't run in this container (no KVM): compile them with
+  `assembleDebugAndroidTest`, then let CI's `device-tests` job run them. It grants the test folder through the real
+  folder picker with UiAutomator, so a DocumentsUI change in the emulator image can break it; check the job log first.
+- CI: `build` (unit tests, signed APK) and `device-tests` (emulator + release-APK crash check) run in parallel; `release`
+  publishes only if both pass. A failing test blocks the release and the auto-update.
 - Google OAuth app is **In production** (published, unverified) since 2026-10-23. Home page and privacy
   policy are served from `docs/` via GitHub Pages (`https://hystericmoon.github.io/drive-folder-sync/`) and are
   linked on the consent screen, so keep those URLs working. Users see Google's "unverified app" warning once at sign-in.
@@ -50,7 +54,7 @@ into the same path under `~/.m2/repository/`.
 Checks before pushing (Maven Central may return 429; retry, and use `--max-workers=2`):
 
 ```sh
-./gradlew --no-daemon --max-workers=2 assembleDebug testDebugUnitTest lintRelease   # unit tests + lint
+./gradlew --no-daemon --max-workers=2 assembleDebug testDebugUnitTest lintRelease assembleDebugAndroidTest   # unit tests + lint
 ./gradlew --no-daemon --max-workers=2 testDebugUnitTest -Pscreenshots               # regenerates app/screenshots/*.png
 ```
 
@@ -68,8 +72,8 @@ To check a signed release build locally, create a throwaway keystore with alias 
 - The Changes API token advances only after a run with zero failures.
 - Excluded paths are forgotten, never deleted.
 - `sync/Planner.kt` is the pure decision table, and `PlannerTest` covers it. Change the tests together with the planner.
-- Room schema changes need a migration plus an exported schema (`app/schemas/`). Check that the migration
-  produces exactly the schema Room generates.
+- Room schema changes need a migration plus an exported schema (`app/schemas/`), and a case in `MigrationTest`, which
+  checks that the migration produces exactly the schema Room generates (schemas reach it as debug-only assets).
 
 ## Design system
 
