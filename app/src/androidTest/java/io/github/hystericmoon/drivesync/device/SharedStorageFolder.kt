@@ -56,10 +56,11 @@ class SharedStorageFolder : ExternalResource() {
                     .launch(initial)
             }
             val device = UiDevice.getInstance(instrumentation)
-            device.wait(Until.findObject(By.text(Pattern.compile("(?i)use this folder"))), 20_000)?.click()
-                ?: error("folder picker didn't show \"Use this folder\"")
+            // Android 11+ says "Use this folder"; Android 10 says "Select" or "Allow access to …".
+            device.wait(Until.findObject(By.text(Pattern.compile("(?i)(use this folder|select|allow access.*)"))), 20_000)?.click()
+                ?: error("folder picker didn't show its confirm button")
+            // Then a confirmation dialog ("Allow"), where the version shows one.
             device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 10_000)?.click()
-                ?: error("folder picker didn't ask to allow access")
             check(picked.await(15, TimeUnit.SECONDS)) { "no result from the folder picker" }
         }
         val uri = checkNotNull(result) { "folder picker returned nothing" }

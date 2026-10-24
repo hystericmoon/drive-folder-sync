@@ -8,6 +8,9 @@ CI builds the APK, and the app updates itself from GitHub Releases. Read `README
 ## Status
 
 - Installed and syncing on the owner's phone. The owner has said they will **not** run manual device tests.
+- **Field data:** the app writes `Drive Folder Sync health.json` to the top of the owner's My Drive (version and update
+  events, per-pair results, recent runs and errors, battery/background restrictions). Read it with the Google Drive
+  connector before diagnosing anything on the phone, and after a release to confirm the self-update landed.
 - **Never verified on a real phone:** the v0.1.9 UI redesign (glass, animations, tabs), sync history,
   exclude rules, and the actual install step of self-update. Keep changes conservative.
 - Tests are the safety net (see README → Tests). The sync engine is covered end to end by `SyncScenarioTest` (fakes in
@@ -16,8 +19,11 @@ CI builds the APK, and the app updates itself from GitHub Releases. Read `README
 - Emulator tests (`androidTest/`) can't run in this container (no KVM): compile them with
   `assembleDebugAndroidTest`, then let CI's `device-tests` job run them. It grants the test folder through the real
   folder picker with UiAutomator, so a DocumentsUI change in the emulator image can break it; check the job log first.
-- CI: `build` (unit tests, signed APK) and `device-tests` (emulator + release-APK crash check) run in parallel; `release`
-  publishes only if both pass. A failing test blocks the release and the auto-update.
+- CI: `build` (unit tests, signed APK) and `device-tests` (emulator on Android 10/14/16 + release-APK crash check) run in
+  parallel; `release` publishes only if all pass. A failing test blocks the release and the auto-update. A weekly
+  scheduled run tests everything and publishes nothing. `LiveDriveTest` runs only if the `DRIVE_TEST_*` secrets exist.
+- `docs/privacy.html` describes what the app accesses and writes (it's on the OAuth consent screen). Keep it accurate
+  when that changes, as for the health file.
 - Google OAuth app is **In production** (published, unverified) since 2026-10-23. Home page and privacy
   policy are served from `docs/` via GitHub Pages (`https://hystericmoon.github.io/drive-folder-sync/`) and are
   linked on the consent screen, so keep those URLs working. Users see Google's "unverified app" warning once at sign-in.

@@ -22,15 +22,21 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         // Lets big uploads run past the 10-minute worker limit. Android may refuse this for
         // background starts; the sync then still runs, just under normal limits.
         runCatching { setForeground(getForegroundInfo()) }
-        return try {
+        val result = try {
             app.engine.sync(pairId)
             Result.success()
         } catch (_: NeedsUserConsentException) {
             Notifier.needsSignIn(applicationContext)
+            app.health.noteEvent("Google access expired; syncing paused until access is granted again")
             Result.failure()
         } catch (_: IOException) {
             if (runAttemptCount < 5) Result.retry() else Result.failure()
         }
+        val pair = app.db.pairs().get(pairId)
+        val outcome = listOfNotNull(pair?.lastSummary, pair?.lastError?.lineSequence()?.first()).joinToString(" | ")
+        app.health.noteRun(pairId, inputData.getString(KEY_TRIGGER) ?: "scheduled", outcome.ifEmpty { "no result" })
+        app.health.publish()
+        return result
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
@@ -45,6 +51,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
     companion object {
         const val KEY_PAIR_ID = "pairId"
+        const val KEY_TRIGGER = "trigger"
         private const val NOTIFICATION_ID = 1
     }
 }

@@ -26,7 +26,7 @@ class SyncScheduler(context: Context) {
         val request = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
             .setConstraints(constraints)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES)
-            .setInputData(workDataOf(SyncWorker.KEY_PAIR_ID to pair.id))
+            .setInputData(workDataOf(SyncWorker.KEY_PAIR_ID to pair.id, SyncWorker.KEY_TRIGGER to "scheduled"))
             .addTag(TAG)
             .build()
         wm.enqueueUniquePeriodicWork(periodicName(pair.id), ExistingPeriodicWorkPolicy.UPDATE, request)
@@ -36,7 +36,7 @@ class SyncScheduler(context: Context) {
     fun syncNow(pairId: Long) {
         val request = OneTimeWorkRequestBuilder<SyncWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-            .setInputData(workDataOf(SyncWorker.KEY_PAIR_ID to pairId))
+            .setInputData(workDataOf(SyncWorker.KEY_PAIR_ID to pairId, SyncWorker.KEY_TRIGGER to "manual"))
             .addTag(TAG)
             .build()
         wm.enqueueUniqueWork(nowName(pairId), ExistingWorkPolicy.KEEP, request)

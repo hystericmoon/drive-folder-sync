@@ -5,6 +5,7 @@ import android.app.Application
 import android.os.Bundle
 import io.github.hystericmoon.drivesync.auth.GoogleAuth
 import io.github.hystericmoon.drivesync.data.AppDatabase
+import io.github.hystericmoon.drivesync.health.HealthReporter
 import io.github.hystericmoon.drivesync.sync.SyncEngine
 import io.github.hystericmoon.drivesync.sync.SyncScheduler
 import io.github.hystericmoon.drivesync.ui.AppSettings
@@ -14,6 +15,7 @@ class DriveSyncApp : Application() {
     lateinit var db: AppDatabase private set
     lateinit var auth: GoogleAuth private set
     lateinit var engine: SyncEngine private set
+    lateinit var health: HealthReporter private set
     lateinit var scheduler: SyncScheduler private set
     lateinit var updater: Updater private set
     lateinit var settings: AppSettings private set
@@ -27,6 +29,7 @@ class DriveSyncApp : Application() {
         db = AppDatabase.create(this)
         auth = GoogleAuth(this)
         engine = SyncEngine(this, db, auth)
+        health = HealthReporter(this, db, auth).also { it.noteAppStart() }
         scheduler = SyncScheduler(this)
         updater = Updater(this)
         settings = AppSettings(this)

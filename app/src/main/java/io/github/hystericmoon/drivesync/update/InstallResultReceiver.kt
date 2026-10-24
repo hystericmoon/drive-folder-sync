@@ -20,6 +20,7 @@ class InstallResultReceiver : BroadcastReceiver() {
                 } ?: return
                 confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 val app = context.applicationContext as DriveSyncApp
+                app.health.noteEvent("Update needs a tap to install")
                 if (app.inForeground) {
                     context.startActivity(confirm)
                 } else {
@@ -27,11 +28,14 @@ class InstallResultReceiver : BroadcastReceiver() {
                 }
             }
             PackageInstaller.STATUS_SUCCESS -> Unit // the app restarts as the new version
-            PackageInstaller.STATUS_FAILURE_ABORTED -> Unit // user tapped Cancel
+            PackageInstaller.STATUS_FAILURE_ABORTED -> health(context).noteEvent("Update install cancelled")
             else -> {
                 val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "status $status"
+                health(context).noteEvent("Update install failed: $msg")
                 Notifier.update(context, "Update failed", msg, null)
             }
         }
     }
+
+    private fun health(context: Context) = (context.applicationContext as DriveSyncApp).health
 }

@@ -16,19 +16,20 @@
   </nav>
 
   <h1>Privacy policy</h1>
-  <p class="meta">Last updated 23 October 2026</p>
+  <p class="meta">Last updated 24 October 2026</p>
 
   <p>Drive Folder Sync is an Android app that copies files between folders on your phone and folders in your own Google Drive. In short: <strong>your files only travel between your phone and your Google account.</strong> The developer runs no servers and receives none of your data.</p>
 
   <h2>Data the app accesses</h2>
   <ul>
     <li><strong>Your Google account email</strong>, to know which account to sync with. It's stored only on your phone.</li>
-    <li><strong>Google Drive files</strong> in the Drive folders you choose to sync. The app requests the full Drive scope (<code>https://www.googleapis.com/auth/drive</code>) because two-way sync must see files you add to those folders from other devices or apps. The app only reads and writes inside the folders you pair, plus the folder browser you use to pick them.</li>
+    <li><strong>Google Drive files</strong> in the Drive folders you choose to sync. The app requests the full Drive scope (<code>https://www.googleapis.com/auth/drive</code>) because two-way sync must see files you add to those folders from other devices or apps. The app only reads and writes inside the folders you pair, plus the folder browser you use to pick them, and one status file described below.</li>
     <li><strong>Phone files</strong> in the folders you pick, through Android's folder picker. The app has no access to any other storage.</li>
   </ul>
 
   <h2>How the data is used</h2>
   <p>Only to sync the folders you paired: uploading phone files to Drive, downloading Drive files to the phone, and moving deleted files to a trash. On the phone, the app keeps a small local database of file names, sizes, timestamps and Drive file IDs so it can tell what changed. It also keeps a sync history.</p>
+  <p>After syncing, the app writes a status file, <em>Drive Folder Sync health.json</em>, to the top of your own My Drive. It holds the app version, each folder pair's last result and recent errors (which can include file names), and phone settings that affect background syncing, such as battery optimisation. It never contains file contents. It stays in your Drive like any other file of yours; you can delete it at any time, and the app writes a new one.</p>
 
   <h2>Sharing</h2>
   <p>None. The app has no analytics, advertising, crash reporting or third-party SDKs that collect data. It talks to only two services:</p>
@@ -41,7 +42,7 @@
   <p>Drive Folder Sync's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
 
   <h2>Storage and deletion</h2>
-  <p>All app data stays on your phone and is removed when you uninstall the app. To revoke the app's access to your Google account, go to <a href="https://myaccount.google.com/permissions">Google Account → Third-party apps &amp; services</a>. Removing a folder pair in the app deletes its sync records but never your files.</p>
+  <p>All app data stays on your phone and is removed when you uninstall the app, except the status file in your Drive, which you can delete yourself. To revoke the app's access to your Google account, go to <a href="https://myaccount.google.com/permissions">Google Account → Third-party apps &amp; services</a>. Removing a folder pair in the app deletes its sync records but never your files.</p>
 
   <h2>Contact</h2>
   <p>Questions or concerns: open an issue at <a href="https://github.com/hystericmoon/drive-folder-sync/issues">github.com/hystericmoon/drive-folder-sync/issues</a>.</p>

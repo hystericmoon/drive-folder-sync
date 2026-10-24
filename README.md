@@ -20,11 +20,12 @@ Regenerate the screenshots with `./gradlew testDebugUnitTest -Pscreenshots` (Rob
 
 - `SyncScenarioTest`: end-to-end scenarios that drive the real `SyncEngine` and Room (in memory, under Robolectric) against fake phone and Drive sides, several sync runs each, checking both sides and the baseline.
 - `DriveClientTest` and `UpdaterTest`: the real Drive client and self-updater against a fake HTTP server (paging, token refresh, retries, resumable uploads; release picking, APK signature checks).
-- `MigrationTest`, plus unit tests for the planner, `RemoteTree`, exclude rules and conflict names.
+- `MigrationTest`, `HealthReporterTest`, plus unit tests for the planner, `RemoteTree`, exclude rules and conflict names.
+- `LiveDriveTest`: the real Drive client and sync engine against a real throwaway Google account. Skipped unless CI has its secrets (SETUP.md, "Optional: live Drive tests").
 
 `./gradlew connectedDebugAndroidTest` runs the emulator tests in `app/src/androidTest`: the phone-storage code against Android's real storage provider (folder granted through the real picker), the engine on real storage, app launch, notifications and scheduling.
 
-CI runs both on every push, plus a launch-and-tap crash check of the minified release APK. The release is published only if all of it passes, so the app never auto-updates to a build that fails a test.
+CI runs both on every push, the emulator tests on Android 10, 14 and 16, plus a launch-and-tap crash check of the minified release APK. The release is published only if all of it passes, so the app never auto-updates to a build that fails a test. A weekly run repeats everything without publishing, to catch outside breakage.
 
 ## How it syncs
 
@@ -59,6 +60,7 @@ Every run does a three-way compare of **phone ↔ baseline ↔ Drive**. The base
 - **Notifications:** you're notified when a conflict copy is created, and when syncing pauses because Google access expired.
 - **Exclude rules:** gitignore-style patterns per pair (**Settings → Folder pairs → Exclude files**), such as `*.tmp`, `node_modules/` or `Photos/raw`. Excluded paths are ignored on both sides and never deleted.
 - **Auto-update:** the app checks GitHub Releases twice a day and installs newer builds signed with the same key.
+- **Health report:** after syncs (at most every 10 minutes) the app updates `Drive Folder Sync health.json` at the top of your My Drive: installed version and update events, each pair's last result, recent runs and errors, and phone settings that stop background work (battery optimisation, background restriction). No file contents. Delete it any time; it's recreated.
 
 ### Drive side
 
@@ -79,6 +81,7 @@ Drive is ID/parent based, so the engine rebuilds paths from the parent chain (`R
 | `sync/SyncWorker.kt`, `SyncScheduler.kt` | WorkManager jobs |
 | `sync/ExcludeRules.kt` | Per-pair ignore patterns (unit-tested) |
 | `update/` | Self-update from GitHub Releases, with a signature check |
+| `health/HealthReporter.kt` | The health report file in My Drive |
 | `Notifier.kt` | Conflict, sign-in, update and progress notifications |
 | `ui/glass/` | Theme, glass surfaces, ambient background, floating nav bar |
 | `ui/` | Folders / History / Settings screens, sync animation (`SyncFlow.kt`) |

@@ -107,6 +107,19 @@ The app checks this repo's **Releases** twice a day on Wi-Fi and installs newer 
 - The first self-update shows Android's install prompt. After that, Android 12+ usually installs updates silently. When it can't, you get an "Update ready" notification.
 - The app refuses any APK that isn't signed with the same key, so only builds from your repo's workflow get installed.
 
+## Optional: live Drive tests
+
+CI can also run the real sync engine against a real Google Drive, to catch Google changing how Drive behaves. It needs a separate, throwaway Google account (never your own: the tests create and trash files). Skip this unless you want it; everything works without it.
+
+1. Create a new Google account just for this.
+2. Google Cloud → **Google Auth Platform** → **Clients** → **Create client** → **Web application**. Under *Authorized redirect URIs* add `https://developers.google.com/oauthplayground` → **Create**. Note the client ID and secret.
+3. Open <https://developers.google.com/oauthplayground> (Desktop site). Gear icon → tick **Use your own OAuth credentials** → paste the client ID and secret.
+4. In *Step 1*, enter `https://www.googleapis.com/auth/drive` → **Authorize APIs** → sign in with the **throwaway** account → allow.
+5. *Step 2* → **Exchange authorization code for tokens**. Copy the **Refresh token**.
+6. GitHub → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**, three times: `DRIVE_TEST_CLIENT_ID`, `DRIVE_TEST_CLIENT_SECRET`, `DRIVE_TEST_REFRESH_TOKEN`.
+
+The next push runs `LiveDriveTest`. If those tests fail, the release is held back like any other failing test.
+
 ---
 
 ## Troubleshooting

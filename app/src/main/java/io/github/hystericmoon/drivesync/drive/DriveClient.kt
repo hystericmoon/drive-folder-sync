@@ -72,6 +72,10 @@ interface DriveApi {
     /** Direct, non-trashed children of a folder. */
     suspend fun listChildren(folderId: String, foldersOnly: Boolean = false): List<DriveFile>
 
+    /** A non-trashed child named exactly [name], if any. */
+    suspend fun findChild(parentId: String, name: String): DriveFile? =
+        listChildren(parentId).firstOrNull { it.name == name }
+
     suspend fun getStartPageToken(): String
 
     /** Every change since [startToken], plus the token to save for next time. Throws [InvalidPageTokenException]. */
@@ -151,6 +155,14 @@ class DriveClient internal constructor(
             pageToken = o.optString("nextPageToken").ifEmpty { null }
         } while (pageToken != null)
         return out
+    }
+
+    /** One query instead of listing a possibly huge folder (used on "My Drive" itself). */
+    override suspend fun findChild(parentId: String, name: String): DriveFile? {
+        val q = "'${parentId.replace("'", "\\'")}' in parents and name = '${name.replace("'", "\\'")}' and trashed = false"
+        val url = api("files").addQueryParameter("q", q).addQueryParameter("pageSize", "1")
+            .addQueryParameter("fields", "files(${DriveFile.FIELDS})")
+        return json(get(url)).optJSONArray("files")?.takeIf { it.length() > 0 }?.let { DriveFile.fromJson(it.getJSONObject(0)) }
     }
 
     override suspend fun getStartPageToken(): String =

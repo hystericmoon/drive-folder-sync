@@ -4,12 +4,17 @@ on:
   push:
     branches: ['**']
   workflow_dispatch:
+  # Weekly check that nothing outside the repo (dependencies, emulator images) broke the build.
+  # Runs every test but publishes nothing.
+  schedule:
+    - cron: '17 4 * * 1'
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  # Scheduled runs get their own group so they never cancel a push build that's publishing a release.
+  group: release-${{ github.ref }}-${{ github.event_name == 'schedule' && 'weekly' || 'push' }}
   cancel-in-progress: true
 
 jobs:
@@ -32,6 +37,11 @@ jobs:
       # Runs before anything is built or published: a failing test stops the release, so the
       # app never auto-updates to it. Includes the end-to-end sync engine scenarios.
       - name: Run tests (a failure blocks the release)
+        env:
+          # Optional: lets LiveDriveTest run against a throwaway Google account (SETUP.md). Skipped when unset.
+          DRIVE_TEST_CLIENT_ID: ${{ secrets.DRIVE_TEST_CLIENT_ID }}
+          DRIVE_TEST_CLIENT_SECRET: ${{ secrets.DRIVE_TEST_CLIENT_SECRET }}
+          DRIVE_TEST_REFRESH_TOKEN: ${{ secrets.DRIVE_TEST_REFRESH_TOKEN }}
         run: ./gradlew --no-daemon testDebugUnitTest
 
       - name: List failed tests
@@ -91,9 +101,18 @@ jobs:
 
   # The app on an Android emulator: phone-storage code against the real provider, the sync engine
   # on real storage, launch, notifications, scheduling, and a crash check of the minified release build.
+  # One job per Android version: the oldest the app supports (10), a common one (14), the newest (16).
   device-tests:
+    name: device-tests (Android ${{ matrix.android }})
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { api: 29, android: 10 }
+          - { api: 34, android: 14 }
+          - { api: 36, android: 16 }
     steps:
       - uses: actions/checkout@v4
 
@@ -123,7 +142,7 @@ jobs:
       - name: Run emulator tests (a failure blocks the release)
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
+          api-level: ${{ matrix.api }}
           target: google_apis
           arch: x86_64
           disable-animations: true
@@ -135,17 +154,18 @@ jobs:
 
       - name: List failed tests
         if: failure()
-        run: python3 .github/scripts/test-summary.py "Emulator tests failed, so nothing was released" "app/build/outputs/androidTest-results/connected/**/*.xml"
+        run: python3 .github/scripts/test-summary.py "Emulator tests failed on Android ${{ matrix.android }}, so nothing was released" "app/build/outputs/androidTest-results/connected/**/*.xml"
 
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: emulator-test-report
+          name: emulator-test-report-android-${{ matrix.android }}
           path: app/build/reports/androidTests/
           retention-days: 7
 
   release:
     needs: [build, device-tests]
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
